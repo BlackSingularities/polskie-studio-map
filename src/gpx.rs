@@ -44,5 +44,3 @@ pub fn parse(text: &str) -> Result<GpxTrack, String> {
     }
     Ok(GpxTrack { name, points })
 }
-
-#[cfg(test)]
