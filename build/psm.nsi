@@ -1,9 +1,8 @@
-﻿; GRAŃ – instalator Windows (NSIS 3, Unicode). Plik zapisany jako UTF-8 z BOM.
-; makensis /DVERSION=2.0.0 /DEXE=..\target\release\Gran.exe /DOUT=..\release\GRAN-Setup-2.0.0.exe build\gran.nsi
+﻿; Polskie Studio Map – instalator Windows (NSIS 3, Unicode). Plik zapisany jako UTF-8 z BOM.
+; makensis /DVERSION=0.1.0 /DEXE=..\target\release\psm.exe /DOUT=..\release\PSM-Setup-0.1.0.exe build\psm.nsi
 ;
 ; Instalacja dla wszystkich użytkowników (Program Files, okno UAC). Tryb cichy: /S; po instalacji
 ; w trybie cichym program uruchamia się z opcją --force-run (tak wywołuje go aktualizator).
-; Instalacja na wersji 1.x (Electron) usuwa ją jej własnym deinstalatorem, zostawiając dane map.
 
 Unicode true
 ManifestDPIAware true
@@ -14,16 +13,14 @@ RequestExecutionLevel admin
   !define VERSION "0.0.0"
 !endif
 !ifndef EXE
-  !define EXE "..\target\release\Gran.exe"
+  !define EXE "..\target\release\psm.exe"
 !endif
 !ifndef OUT
-  !define OUT "..\release\GRAN-Setup-${VERSION}.exe"
+  !define OUT "..\release\PSM-Setup-${VERSION}.exe"
 !endif
 
-!define NAME "GRAŃ"
-!define UNKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\GRAN"
-; klucz deinstalacji wersji 1.x (electron-builder: UUID v5 z appId)
-!define OLDKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\dbc2f3f8-5943-58c8-8a92-70537188d38c"
+!define NAME "Polskie Studio Map"
+!define UNKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\PSM"
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
@@ -34,11 +31,11 @@ Name "${NAME}"
 OutFile "${OUT}"
 InstallDir "$PROGRAMFILES64\${NAME}"
 InstallDirRegKey HKLM "${UNKEY}" "InstallLocation"
-BrandingText "GRAŃ ${VERSION} · redzikowski.com"
+BrandingText "Polskie Studio Map ${VERSION} · redzikowski.com"
 
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey /LANG=1045 "ProductName" "${NAME}"
-VIAddVersionKey /LANG=1045 "FileDescription" "GRAŃ – atlas szlaków górskich 3D (instalator)"
+VIAddVersionKey /LANG=1045 "FileDescription" "Polskie Studio Map – atlas warstw mapowych Polski 3D (instalator)"
 VIAddVersionKey /LANG=1045 "CompanyName" "BlackSingularities"
 VIAddVersionKey /LANG=1045 "LegalCopyright" "© 2026 Adam Rędzikowski"
 VIAddVersionKey /LANG=1045 "FileVersion" "${VERSION}"
@@ -50,7 +47,7 @@ VIAddVersionKey /LANG=1045 "ProductVersion" "${VERSION}"
 !define MUI_UNWELCOMEFINISHPAGE_BITMAP "uninstallerSidebar.bmp"
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN
-!define MUI_FINISHPAGE_RUN_TEXT "Uruchom GRAŃ"
+!define MUI_FINISHPAGE_RUN_TEXT "Uruchom Polskie Studio Map"
 !define MUI_FINISHPAGE_RUN_FUNCTION RunApp
 
 !insertmacro MUI_PAGE_WELCOME
@@ -63,20 +60,17 @@ VIAddVersionKey /LANG=1045 "ProductVersion" "${VERSION}"
 
 ; uruchomienie bez uprawnień administratora (przez Eksploratora, jako zwykły użytkownik)
 Function RunApp
-  Exec '"$WINDIR\explorer.exe" "$INSTDIR\Gran.exe"'
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\psm.exe"'
 FunctionEnd
 
 Function .onInit
   ${IfNot} ${RunningX64}
-    MessageBox MB_ICONSTOP "GRAŃ wymaga 64-bitowego systemu Windows 10 lub 11." /SD IDOK
+    MessageBox MB_ICONSTOP "Polskie Studio Map wymaga 64-bitowego systemu Windows 10 lub 11." /SD IDOK
     Abort
   ${EndIf}
   SetRegView 64
-  ; dotychczasowy folder (ta wersja albo 1.x)
+  ; dotychczasowy folder
   ReadRegStr $0 HKLM "${UNKEY}" "InstallLocation"
-  ${If} $0 == ""
-    ReadRegStr $0 HKLM "${OLDKEY}" "InstallLocation"
-  ${EndIf}
   ${If} $0 != ""
     StrCpy $INSTDIR $0
   ${EndIf}
@@ -87,66 +81,50 @@ FunctionEnd
   StrCpy $1 0
   ${Do}
     ClearErrors
-    Delete "$INSTDIR\Gran.exe"
+    Delete "$INSTDIR\psm.exe"
     ${IfNot} ${Errors}
       ${Break}
     ${EndIf}
     IntOp $1 $1 + 1
     ${If} $1 = 12
-      nsExec::Exec 'taskkill /F /IM Gran.exe'
+      nsExec::Exec 'taskkill /F /IM psm.exe'
       Sleep 800
     ${EndIf}
     ${If} $1 > 20
-      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Zamknij program GRAŃ, żeby kontynuować." /SD IDCANCEL IDRETRY gran_retry
+      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Zamknij program Polskie Studio Map, żeby kontynuować." /SD IDCANCEL IDRETRY psm_retry
       Abort
-      gran_retry:
+      psm_retry:
       StrCpy $1 0
     ${EndIf}
     Sleep 500
   ${Loop}
 !macroend
 
-Section "GRAŃ" SecMain
+Section "Polskie Studio Map" SecMain
   SetShellVarContext all
   SetRegView 64
   SetOutPath "$INSTDIR"
-  ${If} ${FileExists} "$INSTDIR\Gran.exe"
+  ${If} ${FileExists} "$INSTDIR\psm.exe"
     !insertmacro CloseApp
   ${EndIf}
 
-  ; wersja 1.x (Electron): jej deinstalator w trybie aktualizacji (bez pytania o dane map)
-  ReadRegStr $2 HKLM "${OLDKEY}" "UninstallString"
-  ${If} $2 == ""
-  ${AndIf} ${FileExists} "$INSTDIR\Uninstall ${NAME}.exe"
-    StrCpy $2 '"$INSTDIR\Uninstall ${NAME}.exe"'
-  ${EndIf}
-  ${If} $2 != ""
-    DetailPrint "Usuwanie wersji 1.x…"
-    ExecWait '$2 /S --updated _?=$INSTDIR'
-    Delete "$INSTDIR\Uninstall ${NAME}.exe"
-    RMDir /r "$INSTDIR\resources"
-    RMDir /r "$INSTDIR\locales"
-    DeleteRegKey HKLM "${OLDKEY}"
-    SetOutPath "$INSTDIR"
-  ${EndIf}
-
-  File "/oname=Gran.exe" "${EXE}"
+  File "/oname=psm.exe" "${EXE}"
   WriteUninstaller "$INSTDIR\Odinstaluj.exe"
 
-  CreateShortCut "$SMPROGRAMS\${NAME}.lnk" "$INSTDIR\Gran.exe" "" "$INSTDIR\Gran.exe" 0
-  CreateShortCut "$DESKTOP\${NAME}.lnk" "$INSTDIR\Gran.exe" "" "$INSTDIR\Gran.exe" 0
+  CreateShortCut "$SMPROGRAMS\${NAME}.lnk" "$INSTDIR\psm.exe" "" "$INSTDIR\psm.exe" 0
+  CreateShortCut "$DESKTOP\${NAME}.lnk" "$INSTDIR\psm.exe" "" "$INSTDIR\psm.exe" 0
 
-  ; linki gran://widok?… otwierają widok w programie
-  WriteRegStr HKCR "gran" "" "URL:GRAŃ – widok mapy"
-  WriteRegStr HKCR "gran" "URL Protocol" ""
-  WriteRegStr HKCR "gran\DefaultIcon" "" '"$INSTDIR\Gran.exe",0'
-  WriteRegStr HKCR "gran\shell\open\command" "" '"$INSTDIR\Gran.exe" "%1"'
+  ; linki psm://widok?… otwierają widok w programie
+  WriteRegStr HKCR "psm" "" "URL:Polskie Studio Map – widok mapy"
+  WriteRegStr HKCR "psm" "URL Protocol" ""
+  WriteRegStr HKCR "psm\DefaultIcon" "" '"$INSTDIR\psm.exe",0'
+  WriteRegStr HKCR "psm\shell\open\command" "" '"$INSTDIR\psm.exe" "%1"'
 
-  WriteRegStr HKLM "${UNKEY}" "DisplayName" "GRAŃ – atlas szlaków 3D"
+  WriteRegStr HKLM "${UNKEY}" "DisplayName" "Polskie Studio Map – atlas warstw mapowych Polski 3D"
   WriteRegStr HKLM "${UNKEY}" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKLM "${UNKEY}" "DisplayIcon" "$INSTDIR\Gran.exe"
+  WriteRegStr HKLM "${UNKEY}" "DisplayIcon" "$INSTDIR\psm.exe"
   WriteRegStr HKLM "${UNKEY}" "Publisher" "BlackSingularities"
-  WriteRegStr HKLM "${UNKEY}" "URLInfoAbout" "https://redzikowski.com/portfolio/gran-3d"
+  WriteRegStr HKLM "${UNKEY}" "URLInfoAbout" "https://redzikowski.com/portfolio/polskie-studio-map"
   WriteRegStr HKLM "${UNKEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "${UNKEY}" "UninstallString" '"$INSTDIR\Odinstaluj.exe"'
   WriteRegStr HKLM "${UNKEY}" "QuietUninstallString" '"$INSTDIR\Odinstaluj.exe" /S'
@@ -171,14 +149,14 @@ FunctionEnd
 Section "Uninstall"
   SetShellVarContext all
   SetRegView 64
-  nsExec::Exec 'taskkill /F /IM Gran.exe'
-  Delete "$INSTDIR\Gran.exe"
+  nsExec::Exec 'taskkill /F /IM psm.exe'
+  Delete "$INSTDIR\psm.exe"
   Delete "$INSTDIR\Odinstaluj.exe"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${NAME}.lnk"
   Delete "$DESKTOP\${NAME}.lnk"
   DeleteRegKey HKLM "${UNKEY}"
-  DeleteRegKey HKCR "gran"
+  DeleteRegKey HKCR "psm"
 
   ; przy aktualizacji (--updated) albo w trybie cichym dane użytkownika zostają nietknięte
   ${GetParameters} $R0
@@ -190,18 +168,18 @@ Section "Uninstall"
       SetShellVarContext current
       ; folder danych wybrany przez użytkownika (zapisany przez program w datadir.txt, UTF-16 LE)
       ClearErrors
-      FileOpen $0 "$APPDATA\GRAN\datadir.txt" r
+      FileOpen $0 "$APPDATA\PSM\datadir.txt" r
       ${IfNot} ${Errors}
         FileReadUTF16LE $0 $1
         FileClose $0
         ; usuwany jest tylko własny podfolder programu – nigdy wskazany katalog nadrzędny
-        StrCpy $2 $1 9 -9
-        ${If} $2 == "GRAN-dane"
+        StrCpy $2 $1 8 -8
+        ${If} $2 == "PSM-dane"
           RMDir /r "$1"
         ${EndIf}
       ${EndIf}
-      RMDir /r "$LOCALAPPDATA\GRAN"
-      RMDir /r "$APPDATA\GRAN"
+      RMDir /r "$LOCALAPPDATA\PSM"
+      RMDir /r "$APPDATA\PSM"
       SetShellVarContext all
     keep:
   ${EndIf}

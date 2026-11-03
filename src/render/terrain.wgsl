@@ -1,4 +1,4 @@
-// GRAŃ – teren kaflowy: wysokości z kafla DEM (257×257, narożniki pikseli), gradient do cieniowania,
+// Polskie Studio Map – teren kaflowy: wysokości z kafla DEM (257×257, narożniki pikseli), gradient do cieniowania,
 // style (teren, hipsometria, nachylenie, ekspozycja, satelita/ortofoto, mapa), mapa normalnych, cienie, soczewki, mgła.
 
 struct Globals {

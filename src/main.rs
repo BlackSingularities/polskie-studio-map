@@ -1,4 +1,4 @@
-//! GRAŃ — atlas szlaków górskich 3D (Windows, natywnie: Rust + wgpu + egui).
+//! Polskie Studio Map — atlas warstw mapowych Polski w 3D (Windows, natywnie: Rust + wgpu + egui).
 #![cfg_attr(
     all(not(debug_assertions), target_os = "windows"),
     windows_subsystem = "windows"
@@ -11,7 +11,6 @@ mod download;
 mod fmt;
 mod geo;
 mod gpx;
-mod graph;
 mod heights;
 mod landcover;
 mod metrics;
@@ -23,6 +22,7 @@ mod render;
 mod settings;
 mod store;
 mod sun;
+mod trails;
 mod ui;
 mod updater;
 mod world;
@@ -36,8 +36,8 @@ fn main() -> eframe::Result<()> {
         eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).unwrap_or_default();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("GRAŃ")
-            .with_app_id("gran")
+            .with_title("Polskie Studio Map")
+            .with_app_id("psm")
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([1024.0, 640.0])
             .with_icon(icon),
@@ -47,7 +47,7 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "GRAŃ",
+        "Polskie Studio Map",
         options,
         Box::new(|cc| Ok(Box::new(app::App::new(cc)))),
     )

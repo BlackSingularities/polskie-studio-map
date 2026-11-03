@@ -655,7 +655,7 @@ pub fn geocode(q: &str) -> Result<Vec<Place>, String> {
         *l = Some(std::time::Instant::now());
     }
     let url = format!(
-        "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&accept-language=pl&q={}",
+        "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&accept-language=pl&countrycodes=pl&q={}",
         urlencode(q)
     );
     let body = agent()

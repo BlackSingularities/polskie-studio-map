@@ -1,7 +1,7 @@
 //! Magazyn danych map na dysku: jeden folder wybrany przez użytkownika.
 //!
 //! ```text
-//! <folder>\GRAN-dane\
+//! <folder>\PSM-dane\
 //!   tiles\dem\z\bx_by.gpk         teren (wypieczony: u16 + LZ4), paczki 16×16 kafli
 //!   tiles\sat\z\bx_by.gpk         obraz satelitarny (JPEG), paczki 16×16 kafli
 //!   tiles\ortho\z\bx_by.gpk       ortofotomapa (JPEG)
@@ -29,7 +29,7 @@ pub enum Layer {
     Dem,
     /// Obraz satelitarny (Sentinel-2 cloudless 2020 © EOX, CC BY-NC-SA 4.0).
     Sat,
-    /// Ortofotomapa z usług krajowych (GUGiK, ZBGIS, ČÚZK) na tle Sentinel-2, JPEG 512 px.
+    /// Ortofotomapa GUGiK na tle Sentinel-2, JPEG 512 px.
     Ortho,
 }
 
@@ -49,7 +49,7 @@ impl Layer {
         match self {
             Layer::Dem => "dem",
             Layer::Sat => "sat",
-            // „ortho2”: kafle przycięte do krajów (stare z rozmytym tłem ZBGIS pobierają się od nowa)
+            // „ortho2”: kafle przycięte do granicy kraju
             Layer::Ortho => "ortho2",
         }
     }

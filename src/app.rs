@@ -67,7 +67,7 @@ pub struct App {
     last_gc: Instant,
     settings_open: Option<SettingsView>,
     moving: Option<Moving>,
-    /// Zrzut okna do pliku (GRAN_CAPTURE=plik.png, GRAN_CAPTURE_AFTER=sekundy) – zrzuty do dokumentacji i testy.
+    /// Zrzut okna do pliku (PSM_CAPTURE=plik.png, PSM_CAPTURE_AFTER=sekundy) – zrzuty do dokumentacji i testy.
     capture: Option<(PathBuf, Instant, f32, bool)>,
     heights: Heights,
     world: World,
@@ -103,11 +103,11 @@ impl App {
             last_gc: Instant::now(),
             settings_open: None,
             moving: None,
-            capture: std::env::var_os("GRAN_CAPTURE").map(|p| {
+            capture: std::env::var_os("PSM_CAPTURE").map(|p| {
                 (
                     PathBuf::from(p),
                     Instant::now(),
-                    std::env::var("GRAN_CAPTURE_AFTER")
+                    std::env::var("PSM_CAPTURE_AFTER")
                         .ok()
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(6.0),
@@ -116,11 +116,11 @@ impl App {
             }),
         };
         app.collect_garbage();
-        // link gran:// z wiersza poleceń (kliknięty w systemie)
-        if let Some(l) = std::env::args().find(|a| a.starts_with("gran://")) {
+        // link psm:// z wiersza poleceń (kliknięty w systemie)
+        if let Some(l) = std::env::args().find(|a| a.starts_with("psm://")) {
             app.atlas.apply_link(&l);
         }
-        if app.settings.auto_update && std::env::var_os("GRAN_CAPTURE").is_none() {
+        if app.settings.auto_update && std::env::var_os("PSM_CAPTURE").is_none() {
             app.check_updates(false);
         }
         app
@@ -159,7 +159,7 @@ impl App {
             && self.usage.bytes.load(Ordering::Relaxed) > 0
         {
             let r = rfd::MessageDialog::new()
-                .set_title("GRAŃ")
+                .set_title("Polskie Studio Map")
                 .set_description(format!(
                     "Przenieść zapisane dane do nowego folderu?\n\nZ: {}\nDo: {}\n\nTak – dane trafią do nowego folderu, a stary zostanie usunięty.\nNie – nowy folder zacznie się wypełniać od początku, stare dane zostaną w poprzednim miejscu.",
                     self.settings.data_dir.display(),
@@ -311,13 +311,13 @@ impl App {
                                 ui.label(RichText::new(format!("Wolne miejsce: {}", fmt_bytes(f))).small().color(theme::PAPER_3));
                             }
                             if ui.button(theme::ic(theme::icon::FOLDER_OPEN, "Zmień folder…")).clicked() {
-                                if let Some(p) = rfd::FileDialog::new().set_title("Folder na dane map GRANIA").pick_folder() {
+                                if let Some(p) = rfd::FileDialog::new().set_title("Folder na dane map").pick_folder() {
                                     view.draft.data_dir = data_dir_in(&p);
                                 }
                             }
                         }
                         Page::About => {
-                            ui.label(RichText::new(format!("GRAŃ {}", env!("CARGO_PKG_VERSION"))).size(22.0).strong());
+                            ui.label(RichText::new(format!("Polskie Studio Map {}", env!("CARGO_PKG_VERSION"))).size(22.0).strong());
                             if ui.button(theme::ic(theme::icon::ARROWS_CLOCKWISE, "Sprawdź aktualizacje")).clicked() {
                                 check = true;
                             }
@@ -332,7 +332,7 @@ impl App {
                             }
                             ui.add_space(12.0);
                             ui.label(theme::kicker("Źródła danych"));
-                            theme::para(ui, "Teren: Mapterhorn z modeli DMR 5.0 ÚGKK SR (CC BY 4.0), NMT GUGiK i DMR 4G ČÚZK (CC BY 4.0), zapasowo Terrarium/AWS Open Data. Zdjęcia: Sentinel-2 cloudless 2020 © EOX (CC BY-NC-SA 4.0), ortofoto: GUGiK, ČÚZK, ÚGKK SR. Nazwy: OpenFreeMap, OpenMapTiles. Szlaki i punkty: © OpenStreetMap (ODbL). Wyszukiwanie: Nominatim.");
+                            theme::para(ui, "Teren: Mapterhorn z NMT GUGiK (CC BY 4.0), zapasowo Terrarium/AWS Open Data. Zdjęcia: Sentinel-2 cloudless 2020 © EOX (CC BY-NC-SA 4.0), ortofoto: GUGiK. Nazwy: OpenFreeMap, OpenMapTiles. Szlaki i punkty: © OpenStreetMap (ODbL). Wyszukiwanie: Nominatim.");
                         }
                     });
                 });
@@ -377,7 +377,7 @@ impl App {
             match r {
                 Ok(()) => self.commit_settings(m.settings),
                 Err(e) => {
-                    rfd::MessageDialog::new().set_title("GRAŃ").set_level(rfd::MessageLevel::Error).set_description(format!("Nie udało się przenieść danych:\n{e}\n\nDane, których nie przeniesiono, zostały w dotychczasowym folderze.")).show();
+                    rfd::MessageDialog::new().set_title("Polskie Studio Map").set_level(rfd::MessageLevel::Error).set_description(format!("Nie udało się przenieść danych:\n{e}\n\nDane, których nie przeniesiono, zostały w dotychczasowym folderze.")).show();
                 }
             }
         }
@@ -399,7 +399,7 @@ impl App {
     fn offer_update(&mut self, rel: updater::Release) {
         let size = if rel.size > 0 { format!(" ({} MB)", rel.size / (1 << 20)) } else { String::new() };
         let ok = rfd::MessageDialog::new()
-            .set_title("GRAŃ – aktualizacja")
+            .set_title("Polskie Studio Map – aktualizacja")
             .set_description(format!(
                 "Dostępna jest nowa wersja {}. Masz wersję {}.\n\nPobrać i zainstalować aktualizację{size}? Dane map i ustawienia zostaną zachowane. Instalacja wymaga potwierdzenia uprawnień administratora.",
                 rel.version,
@@ -474,7 +474,7 @@ impl App {
                         Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
                         Err(e) => {
                             rfd::MessageDialog::new()
-                                .set_title("GRAŃ")
+                                .set_title("Polskie Studio Map")
                                 .set_level(rfd::MessageLevel::Error)
                                 .set_description(format!("Nie udało się zainstalować aktualizacji: {e}"))
                                 .show();
@@ -538,13 +538,6 @@ impl eframe::App for App {
         if self.last_gc.elapsed() > Duration::from_secs(120) {
             self.collect_garbage();
         }
-        // ślad GPX upuszczony na okno
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
-        for p in dropped {
-            if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("gpx")) {
-                self.atlas.import_gpx(&p);
-            }
-        }
         let r = std::mem::take(&mut self.atlas.requests);
         if r.open_settings {
             self.open_settings(Page::Data);
@@ -563,7 +556,6 @@ impl eframe::App for App {
         crate::ui::panels::search_pill(&mut self.atlas, ctx);
         crate::ui::panels::rail(&mut self.atlas, ctx);
         crate::ui::panels::nav(&mut self.atlas, ctx);
-        crate::ui::panels::profile_panel(&mut self.atlas, ctx);
         self.top_right(ctx);
         crate::ui::search::show(&mut self.atlas, ctx);
         crate::ui::panels::help(&mut self.atlas, ctx);

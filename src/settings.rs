@@ -1,13 +1,13 @@
 //! Ustawienia programu: folder danych, limit rozmiaru, aktualizacje.
-//! Plik `%APPDATA%\GRAN\gran.json`; przy pierwszym starcie folder i limit są podpowiadane
-//! z ustawień poprzedniej wersji (`settings.json` wersji 1.x).
+//! Plik `%APPDATA%\PSM\psm.json`.
+//! Ścieżka danych także w `datadir.txt` (dla deinstalatora).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const DATA_SUBDIR: &str = "GRAN-dane";
+pub const DATA_SUBDIR: &str = "PSM-dane";
 pub const LIMIT_STEPS_GB: [u32; 16] = [
     1, 2, 3, 5, 8, 10, 15, 20, 30, 50, 75, 100, 150, 200, 300, 500,
 ];
@@ -35,20 +35,20 @@ pub fn config_dir() -> PathBuf {
     std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
-        .join("GRAN")
+        .join("PSM")
 }
 
 pub fn default_data_dir() -> PathBuf {
     std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(config_dir)
-        .join("GRAN")
+        .join("PSM")
         .join(DATA_SUBDIR)
 }
 
 /// Folder danych w wybranym miejscu: zawsze własny podfolder, żeby nie mieszać z plikami użytkownika.
 pub fn data_dir_in(picked: &Path) -> PathBuf {
-    // wskazany folder z danymi (także wersji 1.x albo przemianowany) przyjmujemy bez zmian
+    // wskazany folder z danymi (także przemianowany) przyjmujemy bez zmian
     let has_data = ["areas.json", "tiles", ".cache"]
         .iter()
         .any(|n| picked.join(n).exists());
@@ -73,34 +73,21 @@ impl Default for Settings {
 
 impl Settings {
     pub fn load() -> Self {
-        let file = config_dir().join("gran.json");
+        let file = config_dir().join("psm.json");
         if let Some(s) = fs::read(&file)
             .ok()
             .and_then(|b| serde_json::from_slice::<Settings>(&b).ok())
         {
             return s;
         }
-        // podpowiedź z wersji 1.x (Electron)
-        let mut s = Settings::default();
-        if let Some(v) = fs::read(config_dir().join("settings.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-        {
-            if let Some(d) = v.get("dataDir").and_then(|d| d.as_str()) {
-                s.data_dir = PathBuf::from(d);
-            }
-            if let Some(l) = v.get("limitGB").and_then(|l| l.as_u64()) {
-                s.limit_gb = (l as u32).clamp(1, 500);
-            }
-        }
-        s
+        Settings::default()
     }
 
     pub fn save(&self) -> std::io::Result<()> {
         let dir = config_dir();
         fs::create_dir_all(&dir)?;
         fs::write(
-            dir.join("gran.json"),
+            dir.join("psm.json"),
             serde_json::to_vec_pretty(self).unwrap_or_default(),
         )?;
         // ścieżka danych dla deinstalatora (UTF-16 LE z BOM)

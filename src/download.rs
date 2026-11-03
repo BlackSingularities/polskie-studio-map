@@ -11,9 +11,9 @@ use crate::geo::TileId;
 use crate::store::{Layer, Store};
 
 const USER_AGENT: &str = concat!(
-    "GRAN/",
+    "PolskieStudioMap/",
     env!("CARGO_PKG_VERSION"),
-    " (+https://redzikowski.com/portfolio/gran-3d)"
+    " (+https://redzikowski.com/portfolio/polskie-studio-map)"
 );
 
 /// Najwyższy poziom kafla terenu 256 px: ćwiartka kafla 512 px poziomu 15 źródła.
@@ -221,6 +221,9 @@ fn fetch_terrain(store: &Store, t: TileId) -> Result<Vec<u8>, FetchError> {
 
 /// Wypieczony kafel z dysku albo z sieci (pobrany jest od razu wypiekany i zapisywany).
 pub fn get(store: &Store, layer: Layer, t: TileId) -> Result<Vec<u8>, FetchError> {
+    if !crate::national::tile_in_poland(t) {
+        return Err(FetchError::Missing);
+    }
     if let Some(r) = stored(store, layer, t) {
         return r;
     }
