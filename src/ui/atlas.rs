@@ -282,6 +282,8 @@ pub struct Atlas {
     pub search: Option<crate::ui::search::Search>,
     pub help: bool,
     pub layers_open: bool,
+    /// Zapytanie o kliknięty punkt: (dł., szer., warstwy) i zbierane wyniki.
+    pub point_query: Option<((f64, f64, Vec<u16>), Arc<std::sync::Mutex<crate::query::PointInfo>>)>,
     pub layer_query: String,
     pub user_presets: Vec<crate::layers::Preset>,
     pub new_preset: String,
@@ -361,6 +363,7 @@ impl Atlas {
             search: None,
             help: false,
             layers_open: false,
+            point_query: None,
             layer_query: String::new(),
             user_presets: crate::layers::load_presets(),
             new_preset: String::new(),
@@ -1279,7 +1282,8 @@ impl Atlas {
                 Tool::Explore => {
                     // szlak w pobliżu kliknięcia (promień zależny od odległości)
                     let r = (self.cam.distance * 0.006).clamp(15.0, 400.0);
-                    if self.prefs.trails {
+                    // przy włączonych warstwach klik pyta o miejsce, a nie wybiera szlaku
+                    if self.prefs.trails && self.active_layers().is_empty() {
                         if let Some(s) = self.snap.graph.snap(lon, lat, r) {
                             self.selection = Selection::Trail(s.edge);
                             self.prefs.panel_open = true;

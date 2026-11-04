@@ -19,6 +19,7 @@ mod mvt;
 mod national;
 mod osm;
 mod pack;
+mod query;
 mod render;
 mod settings;
 mod store;

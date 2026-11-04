@@ -100,7 +100,17 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
         let (tx, rx) = channel();
         let query = s.q.trim().to_string();
         std::thread::spawn(move || {
-            let _ = tx.send(osm::geocode(&query));
+            // adresy i działki z usług GUGiK przed wynikami Nominatim
+            let mut found = crate::query::search(&query);
+            let r = match osm::geocode(&query) {
+                Ok(p) => {
+                    found.extend(p);
+                    Ok(found)
+                }
+                Err(_) if !found.is_empty() => Ok(found),
+                Err(e) => Err(e),
+            };
+            let _ = tx.send(r);
         });
         s.pending = Some(rx);
     } else if s.typed.is_some() {
@@ -149,7 +159,7 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
         .show(ctx, |ui| {
             let r = ui.add(
                 egui::TextEdit::singleline(&mut s.q)
-                    .hint_text("Szczyt, schronisko, szlak (np. „czerwony”), miejscowość…")
+                    .hint_text("Miejscowość, adres, działka, szczyt, szlak…")
                     .desired_width(f32::INFINITY)
                     .font(egui::TextStyle::Body)
                     .margin(egui::Margin::symmetric(10, 8)),
