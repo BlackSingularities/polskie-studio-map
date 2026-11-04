@@ -332,7 +332,7 @@ impl App {
                             }
                             ui.add_space(12.0);
                             ui.label(theme::kicker("Źródła danych"));
-                            theme::para(ui, "Teren: Mapterhorn z NMT GUGiK (CC BY 4.0), zapasowo Terrarium/AWS Open Data. Zdjęcia: Sentinel-2 cloudless 2020 © EOX (CC BY-NC-SA 4.0), ortofoto: GUGiK. Nazwy: OpenFreeMap, OpenMapTiles. Szlaki i punkty: © OpenStreetMap (ODbL). Wyszukiwanie: Nominatim.");
+                            theme::para(ui, "Teren: NMT i NMPT GUGiK, Mapterhorn z NMT GUGiK (CC BY 4.0), zapasowo Terrarium/AWS Open Data. Zdjęcia: Sentinel-2 cloudless 2020 © EOX (CC BY-NC-SA 4.0), ortofoto: GUGiK. Nazwy: OpenFreeMap, OpenMapTiles. Szlaki i punkty: © OpenStreetMap (ODbL). Wyszukiwanie: Nominatim.");
                         }
                     });
                 });

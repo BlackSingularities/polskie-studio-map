@@ -154,6 +154,8 @@ pub struct Prefs {
     pub vs_eye: f32,
     pub camera: (f64, f64, f64, f64, f64, f64),
     pub panel_open: bool,
+    /// Drzewa i budynki z lidaru (NMPT) na bliskich kaflach.
+    pub surface: bool,
     pub layers: Vec<LayerState>,
     /// Włączone dane na żywo.
     pub feeds: Vec<String>,
@@ -189,6 +191,7 @@ impl Default for Prefs {
             vs_eye: 1.7,
             camera: (c.lon, c.lat, c.height, c.heading, c.pitch, c.distance),
             panel_open: false,
+            surface: false,
             layers: Vec::new(),
             feeds: Vec::new(),
         }
@@ -334,6 +337,7 @@ fn lin(c: [u8; 3], a: f32) -> [f32; 4] {
 impl Atlas {
     pub fn new(heights: Heights, world: World, prefs: Option<Prefs>) -> Self {
         let mut prefs = prefs.unwrap_or_default();
+        crate::download::set_surface(prefs.surface);
         // katalog mógł się zmienić: nieznane warstwy wypadają, nowe dochodzą wyłączone
         let cat = crate::layers::catalog();
         prefs.layers.retain(|l| crate::layers::index_of(&l.id).is_some());
@@ -1849,8 +1853,8 @@ impl Atlas {
         p.rect_filled(bar, 0.0, Color32::from_black_alpha(130));
         p.text(bar.left_center() + Vec2::new(12.0, 0.0), Align2::LEFT_CENTER, info, FontId::monospace(11.5), theme::PAPER_2);
         let attr = match self.prefs.style {
-            Style::Satellite => "Sentinel-2 cloudless 2020 © EOX · ortofoto © GUGiK · teren © Mapterhorn · © OpenStreetMap",
-            _ => "Teren © Mapterhorn (GUGiK), AWS Open Data · © OpenStreetMap",
+            Style::Satellite => "Sentinel-2 cloudless 2020 © EOX · ortofoto i NMT © GUGiK · teren © Mapterhorn · © OpenStreetMap",
+            _ => "Teren © GUGiK, Mapterhorn, AWS Open Data · © OpenStreetMap",
         };
         // atrybucja włączonych warstw (wymagana licencjami)
         let mut sources: Vec<&str> = Vec::new();
