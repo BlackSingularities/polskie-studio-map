@@ -13,6 +13,7 @@ use crate::bake::{self, Dem};
 use crate::download;
 use crate::geo::{meters_per_pixel, TileId, EARTH_R};
 use crate::heights::Heights;
+use crate::layers;
 use crate::national;
 use crate::render::camera::View;
 use crate::store::{Layer, Store};
@@ -37,6 +38,8 @@ pub enum Kind {
     /// Ortofoto złożone z kafli już zapisanych na dysku (bez sieci) – tylko w kolejce,
     /// wynik trafia pod `Ortho`.
     OrthoLocal,
+    /// Warstwa tematyczna (indeks w katalogu).
+    Overlay(u16),
 }
 
 /// Najniższy poziom ortofoto złożonego z zapisanych kafli (przy oddalaniu).
@@ -106,6 +109,15 @@ pub struct DrawTile {
     pub rect: [f32; 4],
 }
 
+/// Warstwa tematyczna na kaflu: rysowana osobno, półprzezroczyście.
+#[derive(Clone, Copy, Debug)]
+pub struct OverlayDraw {
+    pub tile: usize,
+    pub image: (Kind, TileId),
+    pub xform: [f32; 3],
+    pub opacity: f32,
+}
+
 pub struct TileSettings {
     /// Docelowy rozmiar kafla na ekranie (px) – mniejszy = więcej szczegółów.
     pub target_px: f32,
@@ -115,6 +127,8 @@ pub struct TileSettings {
     /// Ortofoto GUGiK na bliskich kaflach.
     pub ortho: bool,
     pub max_dist: f64,
+    /// Włączone warstwy od spodu: (indeks w katalogu, krycie).
+    pub overlays: Vec<(u16, f32)>,
 }
 
 pub struct Tiles {
@@ -136,6 +150,10 @@ pub struct Tiles {
     pub loading: usize,
     /// W kolejce i w toku: (teren, zdjęcia satelitarne, ortofoto pobierane, ortofoto składane z dysku).
     pub loading_kinds: [usize; 4],
+    pub overlay_draws: Vec<OverlayDraw>,
+    /// Kafle warstwy w kolejce i narysowane w tej klatce.
+    pub layer_loading: HashMap<u16, usize>,
+    pub layer_drawn: HashMap<u16, usize>,
 }
 
 const WORKERS: usize = 16;
@@ -195,6 +213,9 @@ impl Tiles {
             empty_img,
             loading: 0,
             loading_kinds: [0; 4],
+            overlay_draws: Vec::new(),
+            layer_loading: HashMap::new(),
+            layer_drawn: HashMap::new(),
         }
     }
 
@@ -324,6 +345,12 @@ impl Tiles {
     /// Wybór kafli do narysowania i zlecenia wczytania brakujących.
     pub fn select(&mut self, view: &View, s: &TileSettings) -> Vec<DrawTile> {
         self.frame += 1;
+        self.overlay_draws.clear();
+        self.layer_drawn.clear();
+        // usługi bywają chwilowo niedostępne: nieudane kafle warstw – próba od nowa co jakiś czas
+        if self.frame % 3600 == 0 {
+            self.missing.retain(|k| !matches!(k.0, Kind::Overlay(_)));
+        }
         let frame = view.frame;
         let planes = frustum(view);
         let focal = view.size[1] as f64 * 0.5 / (45f64.to_radians() / 2.0).tan();
@@ -453,6 +480,24 @@ impl Tiles {
                     None => self.find(&t, Kind::Sat).map(|(a, x)| ((Kind::Sat, a), x)),
                 };
             }
+            for &(i, opacity) in &s.overlays {
+                let min_z = layers::catalog().layers[i as usize].min_z;
+                if t.z < min_z {
+                    continue;
+                }
+                let kind = Kind::Overlay(i);
+                let own = ancestor_at(t, t.z.min(layers::MAX_Z));
+                if !self.img.contains_key(&(kind, own)) && !self.missing.contains(&Key(kind, own)) {
+                    want.push(Request { key: Key(kind, own), prio: prio + 0.4, sticky: false });
+                }
+                if let Some((a, x)) = self.find(&t, kind).filter(|(a, _)| a.z >= min_z) {
+                    if let Some(g) = self.img.get_mut(&(kind, a)) {
+                        g.used = self.frame;
+                    }
+                    self.overlay_draws.push(OverlayDraw { tile: out.len(), image: (kind, a), xform: x, opacity });
+                    *self.layer_drawn.entry(i).or_default() += 1;
+                }
+            }
             if let Some(d) = self.dem.get_mut(&dem_t) {
                 d.used = self.frame;
             }
@@ -481,12 +526,17 @@ impl Tiles {
             q.list.extend(want.into_iter().filter(|r| !inflight.contains(&r.key)).take(256));
             self.loading = q.list.len() + q.inflight.len();
             self.loading_kinds = [0; 4];
+            self.layer_loading.clear();
             for k in q.list.iter().map(|r| r.key.0).chain(q.inflight.iter().map(|k| k.0)) {
                 self.loading_kinds[match k {
                     Kind::Dem => 0,
                     Kind::Sat => 1,
                     Kind::Ortho => 2,
                     Kind::OrthoLocal => 3,
+                    Kind::Overlay(i) => {
+                        *self.layer_loading.entry(i).or_default() += 1;
+                        continue;
+                    }
                 }] += 1;
             }
             cv.notify_all();
@@ -501,13 +551,14 @@ impl Tiles {
             Kind::Dem => t.z.min(16),
             Kind::Sat => t.z.min(SAT_MAX_Z),
             Kind::Ortho | Kind::OrthoLocal => t.z.min(national::ORTHO_MAX_Z),
+            Kind::Overlay(_) => t.z.min(layers::MAX_Z),
         };
         for z in (0..=start).rev() {
             let dz = t.z - z;
             let (a, off, k) = t.ancestor(dz);
             let ok = match kind {
                 Kind::Dem => self.dem.contains_key(&a),
-                Kind::Sat | Kind::Ortho | Kind::OrthoLocal => self.img.contains_key(&(kind, a)),
+                Kind::Sat | Kind::Ortho | Kind::OrthoLocal | Kind::Overlay(_) => self.img.contains_key(&(kind, a)),
             };
             if ok {
                 return Some((a, [off[0], off[1], k]));
@@ -546,6 +597,11 @@ fn ancestor_at(t: TileId, z: u8) -> TileId {
     }
 }
 
+/// Wolne usługi: ortofoto i warstwy WMS.
+fn is_slow(k: Kind) -> bool {
+    matches!(k, Kind::Ortho | Kind::Overlay(_))
+}
+
 fn worker(q: Arc<(Mutex<Queue>, Condvar)>, tx: Sender<Loaded>, heights: Heights, ctx: eframe::egui::Context) {
     loop {
         let req = {
@@ -558,13 +614,13 @@ fn worker(q: Arc<(Mutex<Queue>, Condvar)>, tx: Sender<Loaded>, heights: Heights,
                     .list
                     .iter()
                     .enumerate()
-                    .filter(|(_, r)| slow_free || r.key.0 != Kind::Ortho)
+                    .filter(|(_, r)| slow_free || !is_slow(r.key.0))
                     .min_by(|a, b| a.1.prio.total_cmp(&b.1.prio))
                     .map(|(i, _)| i);
                 if let Some(i) = best {
                     let r = g.list.swap_remove(i);
                     if g.inflight.insert(r.key) {
-                        if r.key.0 == Kind::Ortho {
+                        if is_slow(r.key.0) {
                             g.slow += 1;
                         }
                         break r;
@@ -581,12 +637,16 @@ fn worker(q: Arc<(Mutex<Queue>, Condvar)>, tx: Sender<Loaded>, heights: Heights,
             },
             Kind::Sat => load_img(&heights.store(), req.key.1, Layer::Sat, 256),
             Kind::Ortho => load_img(&heights.store(), req.key.1, Layer::Ortho, national::ORTHO_PX),
+            Kind::Overlay(i) => match layers::load(heights.store().root(), i, req.key.1) {
+                Some(img) => img_levels(img, layers::TILE_PX),
+                None => Payload::Missing,
+            },
             Kind::OrthoLocal => match compose_ortho(&heights.store(), req.key.1, ORTHO_LOCAL_DEPTH) {
                 Some(img) => img_levels(img, national::ORTHO_PX),
                 None => Payload::Missing,
             },
         };
-        if req.key.0 == Kind::Ortho {
+        if is_slow(req.key.0) {
             let (m, cv) = &*q;
             m.lock().unwrap().slow -= 1;
             cv.notify_all();

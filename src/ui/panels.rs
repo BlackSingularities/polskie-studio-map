@@ -77,6 +77,9 @@ pub fn rail(a: &mut Atlas, ctx: &egui::Context) {
                         open_tab(a, Tab::Info);
                     }
                     ui.separator();
+                    if theme::icon_button(ui, theme::icon::STACK, a.layers_open).on_hover_text("Warstwy").clicked() {
+                        a.layers_open = !a.layers_open;
+                    }
                     if theme::icon_button(ui, theme::icon::RULER, a.tool == Tool::Measure).on_hover_text("Pomiar i linia wzroku (2)").clicked() {
                         a.tool = if a.tool == Tool::Measure { Tool::Explore } else { Tool::Measure };
                         a.prefs.panel_open = true;
@@ -104,6 +107,170 @@ pub fn rail(a: &mut Atlas, ctx: &egui::Context) {
                 });
             });
         });
+}
+
+/// Panel warstw: zestawy, włączone warstwy (krycie, kolejność, legenda) i katalog z wyszukiwarką.
+pub fn layers_panel(a: &mut Atlas, ctx: &egui::Context) {
+    use crate::layers::{self, catalog};
+    // legendy pobrane w tle
+    let inbox: Vec<_> = std::mem::take(&mut *a.legend_inbox.lock().unwrap());
+    for (i, img) in inbox {
+        let tex = img.map(|m| {
+            let size = [m.width() as usize, m.height() as usize];
+            ctx.load_texture(format!("legenda-{i}"), egui::ColorImage::from_rgba_unmultiplied(size, m.as_raw()), egui::TextureOptions::LINEAR)
+        });
+        a.legends.insert(i, tex);
+    }
+    if !a.layers_open {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new("Warstwy")
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .fixed_pos([82.0, TOP_Y])
+        .fixed_size([DRAWER_W, 620.0])
+        .show(ctx, |ui| {
+            ui.add(egui::TextEdit::singleline(&mut a.layer_query).hint_text(format!("Szukaj wśród {} warstw…", catalog().layers.len())).desired_width(f32::INFINITY));
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(590.0).show(ui, |ui| {
+                ui.label(theme::kicker("Zestawy"));
+                let builtin = catalog().presets.clone();
+                let mut pick = None;
+                ui.horizontal_wrapped(|ui| {
+                    for p in builtin.iter().chain(a.user_presets.iter()) {
+                        if ui.small_button(&p.name).clicked() {
+                            pick = Some(p.layers.clone());
+                        }
+                    }
+                    if ui.small_button("Wyłącz wszystkie").clicked() {
+                        pick = Some(Vec::new());
+                    }
+                });
+                if let Some(ids) = pick {
+                    for l in &mut a.prefs.layers {
+                        l.on = ids.contains(&l.id);
+                    }
+                }
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut a.new_preset).hint_text("Nazwa własnego zestawu").desired_width(200.0));
+                    if ui.add_enabled(!a.new_preset.trim().is_empty(), egui::Button::new("Zapisz")).clicked() {
+                        let ids = a.prefs.layers.iter().filter(|l| l.on).map(|l| l.id.clone()).collect();
+                        let name = a.new_preset.trim().to_string();
+                        a.user_presets.retain(|p| p.name != name);
+                        a.user_presets.push(layers::Preset { name, layers: ids });
+                        a.new_preset.clear();
+                        if let Err(e) = layers::save_presets(&a.user_presets) {
+                            a.notify(format!("Nie udało się zapisać zestawu: {e}"));
+                        }
+                    }
+                });
+                ui.add_space(6.0);
+                active_layers_ui(a, ui);
+                let q = crate::ui::search::fold(a.layer_query.trim());
+                let mut groups: Vec<&str> = Vec::new();
+                for d in &catalog().layers {
+                    if !groups.contains(&d.group.as_str()) {
+                        groups.push(&d.group);
+                    }
+                }
+                for g in groups {
+                    let list: Vec<&layers::LayerDef> = catalog()
+                        .layers
+                        .iter()
+                        .filter(|d| d.group == g && (q.is_empty() || crate::ui::search::fold(&d.name).contains(&q) || crate::ui::search::fold(g).contains(&q)))
+                        .collect();
+                    if list.is_empty() {
+                        continue;
+                    }
+                    egui::CollapsingHeader::new(format!("{g} ({})", list.len()))
+                        .open(if q.is_empty() { None } else { Some(true) })
+                        .show(ui, |ui| {
+                            for d in list {
+                                let Some(st) = a.prefs.layers.iter_mut().find(|l| l.id == d.id) else { continue };
+                                let tip = format!("{}Źródło: {}\nWidoczna od poziomu {}", if d.desc.is_empty() { String::new() } else { format!("{}\n", d.desc) }, d.attribution, d.min_z);
+                                ui.checkbox(&mut st.on, d.name.as_str()).on_hover_text(tip);
+                            }
+                        });
+                }
+            });
+        });
+    if !open {
+        a.layers_open = false;
+    }
+}
+
+/// Włączone warstwy od góry stosu.
+fn active_layers_ui(a: &mut Atlas, ui: &mut egui::Ui) {
+    use crate::layers;
+    let on: Vec<usize> = (0..a.prefs.layers.len()).rev().filter(|&i| a.prefs.layers[i].on).collect();
+    if on.is_empty() {
+        return;
+    }
+    ui.label(theme::kicker(&format!("Włączone ({})", on.len())));
+    let (loading, drawn) = match &a.renderer {
+        Some(r) => (r.tiles.layer_loading.clone(), r.tiles.layer_drawn.clone()),
+        None => Default::default(),
+    };
+    let mut swap = None;
+    for (k, &i) in on.iter().enumerate() {
+        let Some(ci) = layers::index_of(&a.prefs.layers[i].id) else { continue };
+        let d = &layers::catalog().layers[ci as usize];
+        ui.horizontal(|ui| {
+            if ui.small_button(theme::icon::X).on_hover_text("Wyłącz").clicked() {
+                a.prefs.layers[i].on = false;
+            }
+            ui.label(RichText::new(d.name.as_str()).strong());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if k + 1 < on.len() && ui.small_button("↓").on_hover_text("Niżej").clicked() {
+                    swap = Some((i, on[k + 1]));
+                }
+                if k > 0 && ui.small_button("↑").on_hover_text("Wyżej").clicked() {
+                    swap = Some((i, on[k - 1]));
+                }
+            });
+        });
+        ui.add(egui::Slider::new(&mut a.prefs.layers[i].opacity, 0.05..=1.0).text("krycie").custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
+        let status = if let Some(e) = layers::error_of(ci) {
+            Some((format!("serwis niedostępny: {e}"), theme::WARN))
+        } else if loading.get(&ci).copied().unwrap_or(0) > 0 {
+            Some((format!("ładowanie · {}", loading[&ci]), theme::PAPER_3))
+        } else if drawn.get(&ci).copied().unwrap_or(0) == 0 {
+            Some((format!("nic w tym widoku; przybliż (od poziomu {})", d.min_z), theme::PAPER_3))
+        } else {
+            None
+        };
+        if let Some((t, c)) = status {
+            ui.label(RichText::new(t).small().color(c));
+        }
+        let header = egui::CollapsingHeader::new(RichText::new("Legenda").small()).id_salt(("legenda", ci)).show(ui, |ui| match a.legends.get(&ci) {
+            Some(Some(tex)) => {
+                let s = tex.size_vec2().min(egui::vec2(320.0, 360.0));
+                ui.image((tex.id(), s));
+            }
+            Some(None) => {
+                ui.label(RichText::new("Usługa nie udostępnia legendy.").small().color(theme::PAPER_3));
+            }
+            None => {
+                ui.spinner();
+            }
+        });
+        if header.body_returned.is_some() && !a.legends.contains_key(&ci) && !a.legend_asked.contains(&ci) {
+            a.legend_asked.insert(ci);
+            let (inbox, c) = (a.legend_inbox.clone(), ui.ctx().clone());
+            std::thread::spawn(move || {
+                let img = layers::fetch_legend(ci);
+                inbox.lock().unwrap().push((ci, img));
+                c.request_repaint();
+            });
+        }
+        ui.add_space(4.0);
+    }
+    if let Some((x, y)) = swap {
+        a.prefs.layers.swap(x, y);
+    }
+    ui.separator();
 }
 
 /// Szerokość prawego panelu szczegółów.
@@ -629,7 +796,7 @@ pub fn view_menus(a: &mut Atlas, ui: &mut egui::Ui) {
     };
     let style = a.prefs.style.label();
     menu(ui, a, theme::icon::PALETTE, style, style_tab);
-    menu(ui, a, theme::icon::STACK, "Warstwy", layers_tab);
+    menu(ui, a, theme::icon::STACK, "Widok", layers_tab);
     menu(ui, a, theme::icon::SUN, "Słońce", light_tab);
 }
 

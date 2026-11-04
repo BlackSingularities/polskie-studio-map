@@ -13,6 +13,7 @@ mod geo;
 mod gpx;
 mod heights;
 mod landcover;
+mod layers;
 mod metrics;
 mod mvt;
 mod national;

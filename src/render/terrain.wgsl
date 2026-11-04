@@ -25,7 +25,7 @@ struct Tile {
     rect: vec4<f32>,  // x0, z0, rozmiar (m), głębokość fartucha
     dem: vec4<f32>,   // przesunięcie u, v, skala w kaflu DEM, -
     img: vec4<f32>,   // przesunięcie u, v, skala w kaflu obrazu, obraz jest (1/0)
-    info: vec4<f32>,  // poziom, -, -, -
+    info: vec4<f32>,  // poziom, krycie warstwy, -, -
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -404,4 +404,11 @@ fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     let fog = 1.0 - exp(-in.dist * g.fog_color.w * (1.0 + max(0.0, 900.0 - h) / 1800.0));
     col = mix(col, g.fog_color.rgb, clamp(fog, 0.0, 0.92));
     return vec4(col, 1.0);
+}
+
+// warstwa tematyczna na terenie: obraz usługi z kryciem z panelu (info.y)
+@fragment
+fn fs_overlay(in: VOut) -> @location(0) vec4<f32> {
+    let c = textureSample(img_tex, samp, in.img_uv);
+    return vec4(c.rgb, c.a * tile.info.y);
 }
