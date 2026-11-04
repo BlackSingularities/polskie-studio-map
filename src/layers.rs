@@ -141,6 +141,33 @@ impl LayerDef {
         )
     }
 
+    /// Tekst GetFeatureInfo w punkcie; `None` dla warstw obrazowych (EPSG:4326) i po błędzie.
+    pub fn feature_info(&self, lon: f64, lat: f64) -> Option<String> {
+        if self.crs == 4326 {
+            return None;
+        }
+        // okno 256 px w skali około 1:10 000 (część warstw nie odpowiada w mniejszych skalach)
+        const WM: f64 = 20_037_508.342_789_244;
+        const HALF: f64 = 305.75;
+        let t = crate::geo::tile_at(lon, lat, 16);
+        let (x0, y0, x1, y1) = merc_bounds(t);
+        let (mx, my) = (
+            x0 + (x1 - x0) * (crate::geo::lon_to_x(lon) * 65536.0 - t.x as f64),
+            y1 - (y1 - y0) * (crate::geo::lat_to_y(lat) * 65536.0 - t.y as f64),
+        );
+        debug_assert!(mx.abs() <= WM);
+        let url = format!(
+            "{}?SERVICE=WMS&REQUEST=GetFeatureInfo&VERSION=1.3.0&LAYERS={l}&QUERY_LAYERS={l}&STYLES=&CRS=EPSG:3857&BBOX={:.2},{:.2},{:.2},{:.2}&WIDTH=256&HEIGHT=256&I=128&J=128&FEATURE_COUNT=3&INFO_FORMAT=text/plain",
+            self.url,
+            mx - HALF,
+            my - HALF,
+            mx + HALF,
+            my + HALF,
+            l = self.layer
+        );
+        get_bytes(&url, 2 << 20).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
+    }
+
     fn fetch(&self, t: TileId) -> Result<image::RgbaImage, FetchError> {
         let b = get_bytes(&self.getmap(t), 8 << 20)?;
         // usługi zgłaszają błędy dokumentem XML z kodem 200

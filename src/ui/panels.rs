@@ -556,8 +556,58 @@ fn point_info(a: &mut Atlas, ui: &mut egui::Ui, lon: f64, lat: f64) {
     if let Some(n) = a.name_near(lon, lat, 400.0) {
         ui.label(RichText::new(format!("W pobliżu: {n}")).color(theme::PAPER_2));
     }
+    point_query_ui(a, ui, lon, lat);
     ui.add_space(6.0);
     point_buttons(a, ui, lon, lat);
+}
+
+/// Dane o miejscu z usług: wysokość NMT, adres, działka i atrybuty włączonych warstw.
+fn point_query_ui(a: &mut Atlas, ui: &mut egui::Ui, lon: f64, lat: f64) {
+    let active: Vec<u16> = a.active_layers().into_iter().map(|l| l.0).collect();
+    let key = (lon, lat, active);
+    if a.point_query.as_ref().is_none_or(|q| q.0 != key) {
+        let info = crate::query::start(lon, lat, &key.2, ui.ctx().clone());
+        a.point_query = Some((key, info));
+    }
+    let Some((_, info)) = &a.point_query else { return };
+    let info = info.lock().unwrap();
+    ui.add_space(6.0);
+    if let Some(ad) = &info.address {
+        ui.label(RichText::new(ad).size(17.0).strong());
+    }
+    if let Some(h) = info.height {
+        ui.label(RichText::new(format!("Wysokość z NMT GUGiK: {}", fmt::dec(h as f64, 1))).color(theme::PAPER_2));
+    }
+    let pairs = |ui: &mut egui::Ui, list: &crate::query::Pairs| {
+        for (k, v) in list {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(k).small().color(theme::PAPER_3));
+                ui.label(v);
+            });
+        }
+    };
+    if let Some(p) = &info.parcel {
+        ui.add_space(6.0);
+        ui.label(theme::kicker("Działka"));
+        pairs(ui, p);
+    }
+    for (name, p) in &info.layers {
+        ui.add_space(6.0);
+        ui.label(theme::kicker(name));
+        pairs(ui, p);
+    }
+    if info.pending > 0 {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(RichText::new(format!("pytam usługi · {}", info.pending)).small().color(theme::PAPER_3));
+        });
+    } else if !key_has_layers(&a.point_query) {
+        ui.label(RichText::new("Włącz warstwy, żeby zobaczyć także ich dane o tym miejscu.").small().color(theme::PAPER_3));
+    }
+}
+
+fn key_has_layers(q: &Option<((f64, f64, Vec<u16>), std::sync::Arc<std::sync::Mutex<crate::query::PointInfo>>)>) -> bool {
+    q.as_ref().is_some_and(|q| !q.0 .2.is_empty())
 }
 
 fn trail_info(a: &mut Atlas, ui: &mut egui::Ui, e: u32) {
