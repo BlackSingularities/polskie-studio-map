@@ -556,6 +556,7 @@ impl eframe::App for App {
         crate::ui::panels::search_pill(&mut self.atlas, ctx);
         crate::ui::panels::rail(&mut self.atlas, ctx);
         crate::ui::panels::nav(&mut self.atlas, ctx);
+        crate::ui::panels::layers_panel(&mut self.atlas, ctx);
         self.top_right(ctx);
         crate::ui::search::show(&mut self.atlas, ctx);
         crate::ui::panels::help(&mut self.atlas, ctx);

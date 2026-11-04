@@ -19,7 +19,7 @@ const MSAA: u32 = 4;
 const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const TILE_STRIDE: u64 = 256;
-const MAX_TILES: u64 = 2048;
+const MAX_TILES: u64 = 8192;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -148,6 +148,7 @@ pub struct Renderer {
     line_params: wgpu::Buffer,
     line_params_bind: wgpu::BindGroup,
     terrain: wgpu::RenderPipeline,
+    overlay: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
     blit: wgpu::RenderPipeline,
@@ -354,6 +355,42 @@ impl Renderer {
             multiview: None,
             cache: None,
         });
+        // warstwy tematyczne: ta sama siatka co teren, półprzezroczysty obraz bez zapisu głębi
+        let overlay = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("warstwy"),
+            layout: Some(&layout("warstwy", &[&globals_layout, &tile_layout, &tiles.dem_layout, &tiles.img_layout])),
+            vertex: wgpu::VertexState {
+                module: &terrain_sh,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 12,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32],
+                }],
+            },
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::GreaterEqual,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: ms,
+            fragment: Some(wgpu::FragmentState {
+                module: &terrain_sh,
+                entry_point: Some("fs_overlay"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COLOR,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+            cache: None,
+        });
         let sky = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("niebo"),
             layout: Some(&layout("niebo", &[&sky_layout])),
@@ -473,6 +510,7 @@ impl Renderer {
             line_params,
             line_params_bind,
             terrain,
+            overlay,
             sky,
             lines,
             blit,
@@ -611,7 +649,7 @@ impl Renderer {
     }
 
     /// Klatka 3D do bufora poza ekranem; zwraca wywołanie zwrotne do wklejenia w egui.
-    pub fn render(&mut self, view: &View, scene: &Scene, dyn_lines: &[LineInst], ppp: f32) -> (Blit, Vec<DrawTile>) {
+    pub fn render(&mut self, view: &View, scene: &Scene, overlays: &[(u16, f32)], dyn_lines: &[LineInst], ppp: f32) -> (Blit, Vec<DrawTile>) {
         let any = self.tiles.receive(&self.device, &self.queue);
         let _ = any;
         let size = [
@@ -625,6 +663,7 @@ impl Renderer {
             max_img: scene.max_img,
             imagery: scene.imagery,
             ortho: scene.ortho,
+            overlays: overlays.to_vec(),
             // z wysoka widać daleko: bez tego przy dużym oddaleniu kafle kończą się w połowie widoku
             max_dist: (view.eye.y.abs().max(1000.0) * 60.0).clamp(80_000.0, 2_500_000.0),
         };
@@ -672,7 +711,15 @@ impl Renderer {
         self.dyn_lines.1 = dyn_lines.len() as u32;
 
         let n = draw.len().min(MAX_TILES as usize);
-        let mut tbytes = vec![0u8; n * TILE_STRIDE as usize];
+        let overlay_draws: Vec<tiles::OverlayDraw> = self
+            .tiles
+            .overlay_draws
+            .iter()
+            .filter(|o| o.tile < n)
+            .take(MAX_TILES as usize - n)
+            .copied()
+            .collect();
+        let mut tbytes = vec![0u8; (n + overlay_draws.len()) * TILE_STRIDE as usize];
         for (i, d) in draw.iter().take(n).enumerate() {
             let u = TileUniform {
                 rect: d.rect,
@@ -685,6 +732,17 @@ impl Renderer {
             };
             let o = i * TILE_STRIDE as usize;
             tbytes[o..o + std::mem::size_of::<TileUniform>()].copy_from_slice(bytemuck::bytes_of(&u));
+        }
+        for (i, o) in overlay_draws.iter().enumerate() {
+            let d = &draw[o.tile];
+            let u = TileUniform {
+                rect: d.rect,
+                dem: [d.dem_xform[0], d.dem_xform[1], d.dem_xform[2], 0.0],
+                img: [o.xform[0], o.xform[1], o.xform[2], 1.0],
+                info: [d.tile.z as f32, o.opacity, 0.0, 0.0],
+            };
+            let at = (n + i) * TILE_STRIDE as usize;
+            tbytes[at..at + std::mem::size_of::<TileUniform>()].copy_from_slice(bytemuck::bytes_of(&u));
         }
         if n > 0 {
             self.queue.write_buffer(&self.tile_buf, 0, &tbytes);
@@ -721,6 +779,14 @@ impl Renderer {
                 pass.set_bind_group(1, &self.tile_bind, &[(i as u64 * TILE_STRIDE) as u32]);
                 pass.set_bind_group(2, self.tiles.dem_bind(d.dem), &[]);
                 pass.set_bind_group(3, self.tiles.img_bind(d.img.map(|x| x.0)), &[]);
+                pass.draw_indexed(0..self.index_count, 0, 0..1);
+            }
+
+            pass.set_pipeline(&self.overlay);
+            for (i, o) in overlay_draws.iter().enumerate() {
+                pass.set_bind_group(1, &self.tile_bind, &[((n + i) as u64 * TILE_STRIDE) as u32]);
+                pass.set_bind_group(2, self.tiles.dem_bind(draw[o.tile].dem), &[]);
+                pass.set_bind_group(3, self.tiles.img_bind(Some(o.image)), &[]);
                 pass.draw_indexed(0..self.index_count, 0, 0..1);
             }
 

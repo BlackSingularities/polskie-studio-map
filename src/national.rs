@@ -106,7 +106,7 @@ pub fn has_ortho(t: TileId) -> bool {
 const WM: f64 = 20_037_508.342_789_244;
 
 /// Granice kafla w metrach EPSG:3857: (x0, y0, x1, y1).
-fn merc_bounds(t: TileId) -> (f64, f64, f64, f64) {
+pub fn merc_bounds(t: TileId) -> (f64, f64, f64, f64) {
     let n = (1u64 << t.z) as f64;
     let x0 = t.x as f64 / n * 2.0 * WM - WM;
     let x1 = (t.x + 1) as f64 / n * 2.0 * WM - WM;
@@ -145,7 +145,7 @@ impl Drop for Permit {
     }
 }
 
-fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>, FetchError> {
+pub fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>, FetchError> {
     let _permit = Permit::take();
     let mut last = String::new();
     for attempt in 0..3 {

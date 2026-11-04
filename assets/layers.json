@@ -1,0 +1,67 @@
+{
+  "services": [
+    { "group": "Rzeźba terenu", "url": "https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/ShadedRelief", "crs": 4326, "attribution": "© GUGiK", "min_z": 7, "layers": [
+      { "id": "gugik.nmt.cieniowanie", "name": "Cieniowanie NMT (1 m)", "layer": "Raster", "desc": "Cieniowanie rzeźby z numerycznego modelu terenu.", "opacity": 0.6 } ] },
+    { "group": "Rzeźba terenu", "url": "https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/Hypsometry", "attribution": "© GUGiK", "min_z": 7, "layers": [
+      { "id": "gugik.nmt.hipsometria", "name": "Hipsometria NMT", "layer": "Raster", "desc": "Barwy wysokości z numerycznego modelu terenu.", "opacity": 0.6 } ] },
+    { "group": "Granice i adresy", "url": "https://mapy.geoportal.gov.pl/wss/service/PZGIK/PRG/WMS/AdministrativeBoundaries", "attribution": "PRG © GUGiK", "min_z": 5, "layers": [
+      { "id": "gugik.prg.wojewodztwa", "name": "Województwa", "layer": "A01_Granice_wojewodztw", "opacity": 1.0 },
+      { "id": "gugik.prg.powiaty", "name": "Powiaty", "layer": "A02_Granice_powiatow", "opacity": 1.0, "min_z": 7 },
+      { "id": "gugik.prg.gminy", "name": "Gminy", "layer": "A03_Granice_gmin", "opacity": 1.0, "min_z": 9 },
+      { "id": "gugik.prg.obreby", "name": "Obręby ewidencyjne", "layer": "A06_Granice_obrebow_ewidencyjnych", "opacity": 1.0, "min_z": 12 } ] },
+    { "group": "Granice i adresy", "url": "https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaNumeracjiAdresowej", "attribution": "© GUGiK, gminy", "min_z": 15, "layers": [
+      { "id": "gugik.adresy.punkty", "name": "Punkty adresowe", "layer": "A07_Punkty_adresowe", "opacity": 1.0 },
+      { "id": "gugik.adresy.ulice", "name": "Ulice", "layer": "A08_Ulice", "opacity": 1.0 } ] },
+    { "group": "Działki i budynki", "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow", "attribution": "KIEG © GUGiK, powiaty", "min_z": 15, "layers": [
+      { "id": "gugik.kieg.dzialki", "name": "Działki ewidencyjne", "layer": "dzialki", "opacity": 1.0 },
+      { "id": "gugik.kieg.budynki", "name": "Budynki (EGiB)", "layer": "budynki", "opacity": 1.0 },
+      { "id": "gugik.kieg.kontury", "name": "Kontury klasyfikacyjne", "layer": "kontury", "opacity": 1.0 },
+      { "id": "gugik.kieg.uzytki", "name": "Użytki gruntowe", "layer": "uzytki", "opacity": 1.0 },
+      { "id": "gugik.kieg.obreby", "name": "Granice obrębów (KIEG)", "layer": "obreby", "opacity": 1.0, "min_z": 12 } ] },
+    { "group": "Planowanie przestrzenne", "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego", "attribution": "© GUGiK, gminy", "min_z": 11, "layers": [
+      { "id": "gugik.mpzp.granice", "name": "Granice planów miejscowych", "layer": "plany_granice", "opacity": 1.0 },
+      { "id": "gugik.mpzp.raster", "name": "Plany rastrowe", "layer": "raster", "opacity": 0.7, "min_z": 13 },
+      { "id": "gugik.mpzp.strefy", "name": "Plany wektorowe – strefy", "layer": "wektor-str", "opacity": 0.7, "min_z": 13 },
+      { "id": "gugik.mpzp.zabudowa", "name": "Plany wektorowe – linie zabudowy", "layer": "wektor-lzb", "opacity": 1.0, "min_z": 14 } ] },
+    { "group": "Uzbrojenie terenu", "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu", "attribution": "KIUT © GUGiK, powiaty", "min_z": 15, "layers": [
+      { "id": "gugik.kiut.woda", "name": "Sieć wodociągowa", "layer": "przewod_wodociagowy", "opacity": 1.0 },
+      { "id": "gugik.kiut.kanalizacja", "name": "Sieć kanalizacyjna", "layer": "przewod_kanalizacyjny", "opacity": 1.0 },
+      { "id": "gugik.kiut.gaz", "name": "Sieć gazowa", "layer": "przewod_gazowy", "opacity": 1.0 },
+      { "id": "gugik.kiut.prad", "name": "Sieć elektroenergetyczna", "layer": "przewod_elektroenergetyczny", "opacity": 1.0 },
+      { "id": "gugik.kiut.cieplo", "name": "Sieć ciepłownicza", "layer": "przewod_cieplowniczy", "opacity": 1.0 },
+      { "id": "gugik.kiut.telekom", "name": "Sieć telekomunikacyjna", "layer": "przewod_telekomunikacyjny", "opacity": 1.0 },
+      { "id": "gugik.kiut.urzadzenia", "name": "Urządzenia", "layer": "przewod_urzadzenia", "opacity": 1.0 } ] },
+    { "group": "Przyroda", "url": "https://sdi.gdos.gov.pl/wms", "attribution": "© GDOŚ", "min_z": 5, "layers": [
+      { "id": "gdos.parki_narodowe", "name": "Parki narodowe", "layer": "GDOS:ParkiNarodowe" },
+      { "id": "gdos.parki_krajobrazowe", "name": "Parki krajobrazowe", "layer": "GDOS:ParkiKrajobrazowe" },
+      { "id": "gdos.rezerwaty", "name": "Rezerwaty", "layer": "GDOS:Rezerwaty", "min_z": 7 },
+      { "id": "gdos.natura.oso", "name": "Natura 2000 – obszary specjalnej ochrony (ptaki)", "layer": "GDOS:ObszarySpecjalnejOchrony" },
+      { "id": "gdos.natura.soo", "name": "Natura 2000 – specjalne obszary ochrony (siedliska)", "layer": "GDOS:SpecjalneObszaryOchrony" },
+      { "id": "gdos.okk", "name": "Obszary chronionego krajobrazu", "layer": "GDOS:ObszaryChronionegoKrajobrazu" },
+      { "id": "gdos.pomniki", "name": "Pomniki przyrody", "layer": "GDOS:PomnikiPrzyrody", "min_z": 11 },
+      { "id": "gdos.uzytki", "name": "Użytki ekologiczne", "layer": "GDOS:UzytkiEkologiczne", "min_z": 9 },
+      { "id": "gdos.zespoly", "name": "Zespoły przyrodniczo-krajobrazowe", "layer": "GDOS:ZespolyPrzyrodniczoKrajobrazowe", "min_z": 9 },
+      { "id": "gdos.stanowiska", "name": "Stanowiska dokumentacyjne", "layer": "GDOS:StanowiskaDokumentacyjne", "min_z": 11 } ] },
+    { "group": "Lasy", "url": "https://mapserver.bdl.lasy.gov.pl/ArcGIS/services/WMS_BDL/mapserver/WMSServer", "attribution": "Bank Danych o Lasach", "min_z": 7, "layers": [
+      { "id": "bdl.rdlp", "name": "Regionalne dyrekcje LP", "layer": "6", "opacity": 1.0, "min_z": 5 },
+      { "id": "bdl.nadlesnictwa", "name": "Nadleśnictwa", "layer": "5", "opacity": 1.0 },
+      { "id": "bdl.lesnictwa", "name": "Leśnictwa", "layer": "4", "opacity": 1.0, "min_z": 10 },
+      { "id": "bdl.oddzialy", "name": "Oddziały leśne", "layer": "3", "opacity": 1.0, "min_z": 12 },
+      { "id": "bdl.wydzielenia", "name": "Wydzielenia leśne", "layer": "1", "opacity": 1.0, "min_z": 14 } ] },
+    { "group": "Geologia", "url": "https://cbdgmapa.pgi.gov.pl/arcgis/services/kartografia/smgp50k/MapServer/WMSServer", "attribution": "SMGP © PIG-PIB", "min_z": 9, "layers": [
+      { "id": "pig.smgp.wydzielenia", "name": "Mapa geologiczna 1:50 000 – wydzielenia", "layer": "0", "opacity": 0.7 },
+      { "id": "pig.smgp.granice", "name": "Mapa geologiczna 1:50 000 – granice", "layer": "2", "opacity": 1.0 },
+      { "id": "pig.smgp.skorowidz", "name": "Mapa geologiczna 1:50 000 – skorowidz arkuszy", "layer": "5", "opacity": 1.0, "min_z": 6 } ] },
+    { "group": "Łączność", "url": "https://si2pem.gov.pl/geoserver/public/wms", "attribution": "SI2PEM", "min_z": 9, "layers": [
+      { "id": "si2pem.bts", "name": "Stacje bazowe telefonii", "layer": "base_stations", "opacity": 1.0 },
+      { "id": "si2pem.rtv", "name": "Stacje radiowo-telewizyjne", "layer": "broadcasting_stations", "opacity": 1.0 } ] }
+  ],
+  "presets": [
+    { "name": "Przyroda", "layers": ["gdos.parki_narodowe", "gdos.parki_krajobrazowe", "gdos.rezerwaty", "gdos.natura.oso", "gdos.natura.soo"] },
+    { "name": "Działka", "layers": ["gugik.kieg.dzialki", "gugik.kieg.budynki", "gugik.mpzp.granice", "gugik.mpzp.strefy"] },
+    { "name": "Uzbrojenie", "layers": ["gugik.kieg.dzialki", "gugik.kiut.woda", "gugik.kiut.kanalizacja", "gugik.kiut.gaz", "gugik.kiut.prad", "gugik.kiut.telekom"] },
+    { "name": "Administracja", "layers": ["gugik.prg.wojewodztwa", "gugik.prg.powiaty", "gugik.prg.gminy"] },
+    { "name": "Las", "layers": ["bdl.nadlesnictwa", "bdl.oddzialy", "gdos.rezerwaty"] },
+    { "name": "Geologia", "layers": ["pig.smgp.wydzielenia", "pig.smgp.granice", "gugik.nmt.cieniowanie"] }
+  ]
+}

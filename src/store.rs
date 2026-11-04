@@ -5,6 +5,7 @@
 //!   tiles\dem\z\bx_by.gpk         teren (wypieczony: u16 + LZ4), paczki 16×16 kafli
 //!   tiles\sat\z\bx_by.gpk         obraz satelitarny (JPEG), paczki 16×16 kafli
 //!   tiles\ortho\z\bx_by.gpk       ortofotomapa (JPEG)
+//!   overlays\<warstwa>\z\x_y.png  warstwy tematyczne (WMS)
 //!   sectors\, land\                szlaki, nazwy i pokrycie terenu z OSM
 //! ```
 //!
@@ -141,7 +142,7 @@ impl Store {
         if total <= limit {
             return (0, 0);
         }
-        let mut free: Vec<(SystemTime, u64, PackKey, PathBuf)> = Vec::new();
+        let mut free: Vec<(SystemTime, u64, Option<PackKey>, PathBuf)> = Vec::new();
         for layer in Layer::STORED {
             for (key, path) in pack::list(&self.root.join("tiles"), layer.id(), layer.dir()) {
                 if key.z <= BASE_MAX_Z {
@@ -151,19 +152,22 @@ impl Store {
                     free.push((
                         m.modified().unwrap_or(SystemTime::UNIX_EPOCH),
                         m.len(),
-                        key,
+                        Some(key),
                         path,
                     ));
                 }
             }
         }
+        list_files(&self.root.join("overlays"), &mut free);
         free.sort_by_key(|f| f.0);
         let (mut n, mut freed) = (0, 0);
         for (_, size, key, path) in free {
             if total <= limit * 9 / 10 {
                 break;
             }
-            self.packs.forget(&key);
+            if let Some(key) = &key {
+                self.packs.forget(key);
+            }
             if fs::remove_file(&path).is_ok() {
                 total = total.saturating_sub(size);
                 freed += size;
@@ -171,6 +175,17 @@ impl Store {
             }
         }
         (n, freed)
+    }
+}
+
+fn list_files(dir: &Path, out: &mut Vec<(SystemTime, u64, Option<PackKey>, PathBuf)>) {
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        match e.metadata() {
+            Ok(m) if m.is_dir() => list_files(&e.path(), out),
+            Ok(m) => out.push((m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len(), None, e.path())),
+            Err(_) => {}
+        }
     }
 }
 

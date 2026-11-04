@@ -113,6 +113,14 @@ impl Quality {
     }
 }
 
+/// Warstwa tematyczna w panelu: kolejność listy to kolejność rysowania (od spodu).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LayerState {
+    pub id: String,
+    pub on: bool,
+    pub opacity: f32,
+}
+
 /// Ustawienia zapamiętywane między uruchomieniami.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -146,6 +154,7 @@ pub struct Prefs {
     pub vs_eye: f32,
     pub camera: (f64, f64, f64, f64, f64, f64),
     pub panel_open: bool,
+    pub layers: Vec<LayerState>,
 }
 
 impl Default for Prefs {
@@ -178,6 +187,7 @@ impl Default for Prefs {
             vs_eye: 1.7,
             camera: (c.lon, c.lat, c.height, c.heading, c.pitch, c.distance),
             panel_open: false,
+            layers: Vec::new(),
         }
     }
 }
@@ -271,6 +281,14 @@ pub struct Atlas {
     pub ctx_menu: Option<(Pos2, f64, f64, f32)>,
     pub search: Option<crate::ui::search::Search>,
     pub help: bool,
+    pub layers_open: bool,
+    pub layer_query: String,
+    pub user_presets: Vec<crate::layers::Preset>,
+    pub new_preset: String,
+    /// Legendy: pobrane w tle obrazy i gotowe tekstury.
+    pub legend_inbox: Arc<std::sync::Mutex<Vec<(u16, Option<image::RgbaImage>)>>>,
+    pub legends: std::collections::HashMap<u16, Option<egui::TextureHandle>>,
+    pub legend_asked: std::collections::HashSet<u16>,
     pub tab: crate::ui::panels::Tab,
     pub toast: Option<(String, Instant)>,
     pub last_view: Option<View>,
@@ -289,7 +307,15 @@ fn lin(c: [u8; 3], a: f32) -> [f32; 4] {
 
 impl Atlas {
     pub fn new(heights: Heights, world: World, prefs: Option<Prefs>) -> Self {
-        let prefs = prefs.unwrap_or_default();
+        let mut prefs = prefs.unwrap_or_default();
+        // katalog mógł się zmienić: nieznane warstwy wypadają, nowe dochodzą wyłączone
+        let cat = crate::layers::catalog();
+        prefs.layers.retain(|l| crate::layers::index_of(&l.id).is_some());
+        for d in &cat.layers {
+            if !prefs.layers.iter().any(|l| l.id == d.id) {
+                prefs.layers.push(LayerState { id: d.id.clone(), on: false, opacity: d.opacity });
+            }
+        }
         let (lon, lat, height, heading, pitch, distance) = prefs.camera;
         let cam = Camera { lon, lat, height, heading, pitch, distance, ..Camera::default() };
         metrics::set_model(if prefs.din { TimeModel::Din } else { TimeModel::Pttk }, prefs.pace);
@@ -334,6 +360,13 @@ impl Atlas {
             ctx_menu: None,
             search: None,
             help: false,
+            layers_open: false,
+            layer_query: String::new(),
+            user_presets: crate::layers::load_presets(),
+            new_preset: String::new(),
+            legend_inbox: Arc::default(),
+            legends: Default::default(),
+            legend_asked: Default::default(),
             tab: crate::ui::panels::Tab::Info,
             toast: None,
             last_view: None,
@@ -944,6 +977,16 @@ impl Atlas {
         self.move_target((g.x - hit.x).clamp(-lim, lim), (g.z - hit.z).clamp(-lim, lim));
     }
 
+    /// Włączone warstwy od spodu: (indeks w katalogu, krycie).
+    pub fn active_layers(&self) -> Vec<(u16, f32)> {
+        self.prefs
+            .layers
+            .iter()
+            .filter(|l| l.on)
+            .filter_map(|l| Some((crate::layers::index_of(&l.id)?, l.opacity)))
+            .collect()
+    }
+
     /// Kamera nie wychodzi poza Polskę (z zapasem 10 km).
     fn keep_in_poland(&mut self) {
         let (lon, lat) = crate::national::clamp_to_poland(self.cam.lon, self.cam.lat);
@@ -1076,6 +1119,7 @@ impl Atlas {
 
         let scene = self.scene(&view);
         let lines = self.dyn_lines(&view);
+        let overlays = self.active_layers();
         let ppp = ctx.pixels_per_point();
         if let Some(r) = &mut self.renderer {
             let key = self.snap.version * 1_000_000 + self.frame_version * 2 + self.prefs.trails as u64;
@@ -1083,7 +1127,7 @@ impl Atlas {
                 let tl = if self.prefs.trails { trail_lines(&self.snap, &self.frame, ppp) } else { Vec::new() };
                 r.set_static_lines(key, &tl);
             }
-            let (blit, _) = r.render(&view, &scene, &lines, ppp);
+            let (blit, _) = r.render(&view, &scene, &overlays, &lines, ppp);
             ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, blit));
             let [dem, sat, ortho, local] = r.tiles.loading_kinds;
             let mut parts = Vec::new();
@@ -1640,6 +1684,15 @@ impl Atlas {
             Style::Satellite => "Sentinel-2 cloudless 2020 © EOX · ortofoto © GUGiK · teren © Mapterhorn · © OpenStreetMap",
             _ => "Teren © Mapterhorn (GUGiK), AWS Open Data · © OpenStreetMap",
         };
+        // atrybucja włączonych warstw (wymagana licencjami)
+        let mut sources: Vec<&str> = Vec::new();
+        for (i, _) in self.active_layers() {
+            let a = crate::layers::catalog().layers[i as usize].attribution.as_str();
+            if !sources.contains(&a) {
+                sources.push(a);
+            }
+        }
+        let attr = if sources.is_empty() { attr.to_string() } else { format!("{} · {attr}", sources.join(" · ")) };
         p.text(bar.right_center() - Vec2::new(12.0, 0.0), Align2::RIGHT_CENTER, attr, FontId::proportional(10.5), theme::PAPER_3);
 
         // stan wczytywania i tryby
