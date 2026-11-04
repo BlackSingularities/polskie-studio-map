@@ -23,6 +23,7 @@ mod pack;
 mod query;
 mod render;
 mod settings;
+mod stats;
 mod store;
 mod sun;
 mod trails;

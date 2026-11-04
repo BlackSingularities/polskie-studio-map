@@ -481,7 +481,7 @@ impl Tiles {
                 };
             }
             for &(i, opacity) in &s.overlays {
-                let min_z = layers::catalog().layers[i as usize].min_z;
+                let min_z = layers::min_z(i);
                 if t.z < min_z {
                     continue;
                 }

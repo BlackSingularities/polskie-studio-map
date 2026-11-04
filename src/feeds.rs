@@ -146,7 +146,7 @@ impl Hub {
     }
 }
 
-fn get_json(url: &str) -> Result<Value, String> {
+pub fn get_json(url: &str) -> Result<Value, String> {
     let b = get_bytes(url, 32 << 20).map_err(|e| e.to_string())?;
     serde_json::from_slice(&b).map_err(|_| "usługa nie zwróciła danych JSON".to_string())
 }
