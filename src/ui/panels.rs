@@ -83,6 +83,9 @@ pub fn rail(a: &mut Atlas, ctx: &egui::Context) {
                     if theme::icon_button(ui, theme::icon::CHART_BAR, a.stats_open).on_hover_text("Statystyka GUS").clicked() {
                         a.stats_open = !a.stats_open;
                     }
+                    if theme::icon_button(ui, theme::icon::CLOUD_SUN, a.weather_open).on_hover_text("Pogoda").clicked() {
+                        a.weather_open = !a.weather_open;
+                    }
                     if theme::icon_button(ui, theme::icon::RULER, a.tool == Tool::Measure).on_hover_text("Pomiar i linia wzroku (2)").clicked() {
                         a.tool = if a.tool == Tool::Measure { Tool::Explore } else { Tool::Measure };
                         a.prefs.panel_open = true;
@@ -349,6 +352,95 @@ fn subject_tree(a: &mut Atlas, ui: &mut egui::Ui, parent: &str, pick: &mut Optio
                 subject_tree(a, ui, &s.id, pick);
             }
         });
+    }
+}
+
+/// Panel pogody: pole barwne, oś czasu, cząstki wiatru i satelita.
+pub fn weather_panel(a: &mut Atlas, ctx: &egui::Context) {
+    use crate::weather::{self, Field};
+    // odtwarzanie działa także przy zwiniętym panelu
+    let grid = weather::grid();
+    if a.weather_field.is_some() || a.wind_particles {
+        weather::ensure(ctx);
+    }
+    if let (true, Some(g)) = (a.weather_play, &grid) {
+        if a.weather_tick() {
+            let h = a.weather_hour.unwrap_or_else(|| g.now_index());
+            a.weather_hour = Some((h + 1) % g.times.len());
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
+    if !a.weather_open {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new("Pogoda")
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .fixed_pos([82.0, TOP_Y])
+        .default_width(DRAWER_W)
+        .show(ctx, |ui| {
+            ui.set_width(DRAWER_W);
+            ui.horizontal_wrapped(|ui| {
+                if ui.selectable_label(a.weather_field.is_none(), "Bez pola").clicked() {
+                    a.weather_field = None;
+                }
+                for f in Field::ALL {
+                    if ui.selectable_label(a.weather_field == Some(f), f.label()).clicked() {
+                        a.weather_field = Some(f);
+                    }
+                }
+            });
+            ui.checkbox(&mut a.wind_particles, "Animacja wiatru");
+            ui.checkbox(&mut a.satellite, "Obraz satelitarny IR (EUMETSAT, co 15 min)");
+            if let Some(f) = a.weather_field {
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    for (v, c) in f.ramp() {
+                        let (r, _) = ui.allocate_exact_size(egui::vec2(16.0, 12.0), egui::Sense::hover());
+                        ui.painter().rect_filled(r, 2.0, Color32::from_rgb(c[0], c[1], c[2]));
+                        ui.label(RichText::new(format!("{v}")).small());
+                    }
+                    ui.label(RichText::new(f.unit()).small().color(theme::PAPER_3));
+                });
+            }
+            ui.add_space(6.0);
+            if weather::busy() {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new("pobieranie prognozy…").small().color(theme::PAPER_3));
+                });
+            }
+            if let Some(e) = weather::error() {
+                ui.label(RichText::new(format!("serwis niedostępny: {e}")).small().color(theme::WARN));
+            }
+            match &grid {
+                Some(g) => {
+                    let mut h = a.weather_hour.unwrap_or_else(|| g.now_index());
+                    ui.label(RichText::new(weather::time_label(g.times[h.min(g.times.len() - 1)])).size(18.0).strong());
+                    ui.spacing_mut().slider_width = DRAWER_W - 30.0;
+                    if ui.add(egui::Slider::new(&mut h, 0..=g.times.len() - 1).show_value(false)).changed() {
+                        a.weather_hour = Some(h);
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button(if a.weather_play { "Zatrzymaj" } else { "Odtwarzaj" }).clicked() {
+                            a.weather_play = !a.weather_play;
+                        }
+                        if ui.button("Teraz").clicked() {
+                            a.weather_hour = None;
+                            a.weather_play = false;
+                        }
+                    });
+                }
+                None => {
+                    theme::para(ui, "Wybierz pole albo animację wiatru, żeby pobrać prognozę.");
+                }
+            }
+            ui.label(RichText::new("Siatka co 0,5° (około 50 km), dwa dni wstecz i trzy naprzód.").small().color(theme::PAPER_3));
+        });
+    if !open {
+        a.weather_open = false;
     }
 }
 
@@ -793,6 +885,14 @@ fn point_query_ui(a: &mut Atlas, ui: &mut egui::Ui, lon: f64, lat: f64) {
     if a.point_query.as_ref().is_none_or(|q| q.0 != key) {
         let info = crate::query::start(lon, lat, &key.2, ui.ctx().clone());
         a.point_query = Some((key, info));
+    }
+    if let (Some(f), Some(g)) = (a.weather_field, crate::weather::grid()) {
+        let hour = a.weather_hour.unwrap_or_else(|| g.now_index());
+        if let Some(v) = g.value(f, hour, lon, lat) {
+            ui.add_space(6.0);
+            ui.label(theme::kicker(&format!("{} · {}", f.label(), g.times.get(hour).map_or(String::new(), |t| crate::weather::time_label(*t)))));
+            ui.label(RichText::new(format!("{} {}", fmt::dec(v as f64, 1), f.unit())).strong());
+        }
     }
     if let Some((name, v, m)) = crate::stats::value_at(lon, lat) {
         ui.add_space(6.0);

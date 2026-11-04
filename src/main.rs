@@ -29,6 +29,7 @@ mod sun;
 mod trails;
 mod ui;
 mod updater;
+mod weather;
 mod world;
 
 fn main() -> eframe::Result<()> {

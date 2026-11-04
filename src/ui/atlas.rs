@@ -287,6 +287,14 @@ pub struct Atlas {
     pub search: Option<crate::ui::search::Search>,
     pub help: bool,
     pub layers_open: bool,
+    pub weather_open: bool,
+    pub weather_field: Option<crate::weather::Field>,
+    pub weather_hour: Option<usize>,
+    pub weather_play: bool,
+    weather_step: Instant,
+    pub satellite: bool,
+    pub wind_particles: bool,
+    particles: Vec<(f64, f64, f32)>,
     pub stats_open: bool,
     pub stats_bars: bool,
     pub stats_level: crate::stats::Level,
@@ -379,6 +387,14 @@ impl Atlas {
             search: None,
             help: false,
             layers_open: false,
+            weather_open: false,
+            weather_field: None,
+            weather_hour: None,
+            weather_play: false,
+            weather_step: Instant::now(),
+            satellite: false,
+            wind_particles: false,
+            particles: Vec::new(),
             stats_open: false,
             stats_bars: false,
             stats_level: crate::stats::Level::County,
@@ -1016,6 +1032,15 @@ impl Atlas {
             .collect()
     }
 
+    /// Czy minął czas na następną klatkę odtwarzania pogody.
+    pub fn weather_tick(&mut self) -> bool {
+        if self.weather_step.elapsed() < Duration::from_millis(700) {
+            return false;
+        }
+        self.weather_step = Instant::now();
+        true
+    }
+
     /// Kamera nie wychodzi poza Polskę (z zapasem 10 km).
     fn keep_in_poland(&mut self) {
         let (lon, lat) = crate::national::clamp_to_poland(self.cam.lon, self.cam.lat);
@@ -1150,6 +1175,13 @@ impl Atlas {
         let scene = self.scene(&view);
         let lines = self.dyn_lines(&view);
         let mut overlays = self.active_layers();
+        if self.satellite {
+            overlays.push((crate::weather::satellite_overlay(), 0.75));
+        }
+        if let (Some(f), Some(g)) = (self.weather_field, crate::weather::grid()) {
+            let hour = self.weather_hour.unwrap_or_else(|| g.now_index());
+            overlays.push((g.overlay(f, hour), 0.75));
+        }
         if let Some(i) = crate::stats::overlay() {
             // kartogram pod warstwami tematycznymi
             overlays.insert(0, (i, 0.8));
@@ -1599,6 +1631,44 @@ impl Atlas {
                 }
             }
         }
+        // cząstki wiatru: krótkie kreski płynące z polem wiatru wybranej godziny
+        if self.wind_particles {
+            if let Some(g) = crate::weather::grid() {
+                let hour = self.weather_hour.unwrap_or_else(|| g.now_index());
+                let dt = ui.input(|i| i.stable_dt).min(0.05) as f64;
+                if self.particles.is_empty() {
+                    // rozkład pseudolosowy o stałym wzorze (złoty podział)
+                    self.particles = (0..900)
+                        .map(|i| {
+                            let (a, b) = ((i as f64 * 0.618_034).fract(), (i as f64 * 0.754_878).fract());
+                            (14.0 + a * 10.2, 49.0 + b * 5.9, (i % 90) as f32)
+                        })
+                        .collect();
+                }
+                let mut lines = Vec::new();
+                for (k, q) in self.particles.iter_mut().enumerate() {
+                    q.2 += 1.0;
+                    let (fa, fb) = ((k as f64 * 0.618_034 + q.2 as f64 * 0.013).fract(), (k as f64 * 0.754_878 + q.2 as f64 * 0.017).fract());
+                    if q.2 > 110.0 || !crate::national::in_poland(q.0, q.1) {
+                        *q = (14.0 + fa * 10.2, 49.0 + fb * 5.9, 0.0);
+                        continue;
+                    }
+                    let Some((u, v)) = g.wind(hour, q.0, q.1) else { continue };
+                    // przyspieszenie, żeby ruch był widoczny w skali kraju
+                    q.0 += u as f64 * dt * 0.012 / q.1.to_radians().cos();
+                    q.1 += v as f64 * dt * 0.012;
+                    let tail = (q.0 - u as f64 * 0.006 / q.1.to_radians().cos(), q.1 - v as f64 * 0.006);
+                    lines.push((*q, tail));
+                }
+                for (a, b) in lines {
+                    let e = self.heights.sample_cached(a.0, a.1).unwrap_or(0.0);
+                    if let (Some(s0), Some(s1)) = (view.project(self.local(a.0, a.1, e)), view.project(self.local(b.0, b.1, e))) {
+                        p.line_segment([at(s0), at(s1)], Stroke::new(1.3, Color32::from_white_alpha(170)));
+                    }
+                }
+                ui.ctx().request_repaint();
+            }
+        }
         // dane na żywo: rozmiar i barwa z wartości, przy zagęszczeniu zostają najważniejsze
         let mut hits = Vec::new();
         for def in &crate::feeds::FEEDS {
@@ -1784,6 +1854,12 @@ impl Atlas {
         };
         // atrybucja włączonych warstw (wymagana licencjami)
         let mut sources: Vec<&str> = Vec::new();
+        if self.weather_field.is_some() || self.wind_particles {
+            sources.push("Open-Meteo (CC BY 4.0), użytek niekomercyjny");
+        }
+        if self.satellite {
+            sources.push("© EUMETSAT");
+        }
         if crate::stats::map().is_some() {
             sources.push("GUS BDL · PRG © GUGiK");
         }
