@@ -266,6 +266,8 @@ pub struct Atlas {
     fly: Option<FlyTo>,
     pub panorama: Option<Camera>,
     drag_grab: Option<DVec3>,
+    /// Obrót: chwycony punkt terenu (dł., szer., wysokość) i jego piksel w widoku.
+    orbit: Option<(f64, f64, f32, [f32; 2])>,
     pub ctx_menu: Option<(Pos2, f64, f64, f32)>,
     pub search: Option<crate::ui::search::Search>,
     pub help: bool,
@@ -328,6 +330,7 @@ impl Atlas {
             fly: None,
             panorama: None,
             drag_grab: None,
+            orbit: None,
             ctx_menu: None,
             search: None,
             help: false,
@@ -926,6 +929,21 @@ impl Atlas {
         self.cam.lon = (self.cam.lon + 540.0).rem_euclid(360.0) - 180.0;
     }
 
+    /// Po obrocie przesuwa kamerę tak, żeby chwycony punkt został w tym samym miejscu ekranu.
+    fn hold_orbit_point(&mut self, view: &View) {
+        let Some((lon, lat, e, px)) = self.orbit else { return };
+        let g = self.local(lon, lat, e);
+        let next = self.cam.view(self.frame, self.prefs.exag, view.size, g.y / self.prefs.exag);
+        let dir = next.ray(px);
+        // punkt nad horyzontem: nie ma czego trzymać, sam obrót
+        if dir.y >= -0.02 {
+            return;
+        }
+        let hit = next.eye + dir * ((g.y - next.eye.y) / dir.y);
+        let lim = self.cam.distance * 2.0;
+        self.move_target((g.x - hit.x).clamp(-lim, lim), (g.z - hit.z).clamp(-lim, lim));
+    }
+
     /// Kamera nie wychodzi poza Polskę (z zapasem 10 km).
     fn keep_in_poland(&mut self) {
         let (lon, lat) = crate::national::clamp_to_poland(self.cam.lon, self.cam.lat);
@@ -1161,7 +1179,15 @@ impl Atlas {
         if resp.drag_stopped_by(egui::PointerButton::Primary) {
             self.drag_grab = None;
         }
-        // obrót i nachylenie
+        // obrót i nachylenie wokół chwyconego punktu terenu (jak w Google Earth)
+        if resp.drag_started_by(egui::PointerButton::Secondary) || resp.drag_started_by(egui::PointerButton::Middle) {
+            self.orbit = None;
+            if self.panorama.is_none() {
+                if let Some(px) = ctx.input(|i| i.pointer.press_origin()).map(to_px) {
+                    self.orbit = self.ground(view, px).map(|(lon, lat, e)| (lon, lat, e, px));
+                }
+            }
+        }
         if resp.dragged_by(egui::PointerButton::Secondary) || resp.dragged_by(egui::PointerButton::Middle) {
             self.fly = None;
             let d = resp.drag_delta();
@@ -1169,6 +1195,10 @@ impl Atlas {
             self.cam.heading = (self.cam.heading + d.x as f64 * s).rem_euclid(360.0);
             self.cam.pitch = (self.cam.pitch + d.y as f64 * 0.22).clamp(self.min_pitch(), 89.0);
             self.ctx_menu = None;
+            self.hold_orbit_point(view);
+        }
+        if resp.drag_stopped() {
+            self.orbit = None;
         }
         if resp.secondary_clicked() {
             if let (Some(p), Some((lon, lat, e))) = (pointer, self.hover) {
@@ -1456,6 +1486,11 @@ impl Atlas {
                 let sp = at(s);
                 p.circle(sp, 6.0, Color32::WHITE, Stroke::new(2.0, Color32::BLACK));
                 p.text(sp + Vec2::new(9.0, -9.0), Align2::LEFT_BOTTOM, (i + 1).to_string(), FontId::proportional(11.0), Color32::WHITE);
+            }
+        }
+        if let Some((lon, lat, e, _)) = self.orbit {
+            if let Some(s) = view.project(self.local(lon, lat, e)) {
+                p.circle_stroke(at(s), 6.0, Stroke::new(2.0, theme::PAPER));
             }
         }
         if let Some((lon, lat, e)) = self.lens_pin {
