@@ -80,6 +80,9 @@ pub fn rail(a: &mut Atlas, ctx: &egui::Context) {
                     if theme::icon_button(ui, theme::icon::STACK, a.layers_open).on_hover_text("Warstwy").clicked() {
                         a.layers_open = !a.layers_open;
                     }
+                    if theme::icon_button(ui, theme::icon::CHART_BAR, a.stats_open).on_hover_text("Statystyka GUS").clicked() {
+                        a.stats_open = !a.stats_open;
+                    }
                     if theme::icon_button(ui, theme::icon::RULER, a.tool == Tool::Measure).on_hover_text("Pomiar i linia wzroku (2)").clicked() {
                         a.tool = if a.tool == Tool::Measure { Tool::Explore } else { Tool::Measure };
                         a.prefs.panel_open = true;
@@ -199,6 +202,153 @@ pub fn layers_panel(a: &mut Atlas, ctx: &egui::Context) {
         });
     if !open {
         a.layers_open = false;
+    }
+}
+
+/// Panel statystyki: wskaźnik GUS (temat → zmienna, albo wyszukiwarka), poziom, rok, klasy, legenda.
+pub fn stats_panel(a: &mut Atlas, ctx: &egui::Context) {
+    use crate::stats::{self, Level, Method};
+    if !a.stats_open {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new("Statystyka GUS")
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .fixed_pos([82.0, TOP_Y])
+        .fixed_size([DRAWER_W, 620.0])
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(620.0).show(ui, |ui| {
+                let mut reload = false;
+                ui.horizontal(|ui| {
+                    for l in Level::ALL {
+                        reload |= ui.selectable_value(&mut a.stats_level, l, l.label()).changed();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Rok");
+                    if ui.small_button("◀").clicked() {
+                        a.stats_year -= 1;
+                        reload = true;
+                    }
+                    ui.label(RichText::new(a.stats_year.to_string()).strong());
+                    if ui.small_button("▶").clicked() {
+                        a.stats_year += 1;
+                        reload = true;
+                    }
+                    ui.separator();
+                    let before = a.stats_method;
+                    ui.selectable_value(&mut a.stats_method, Method::Quantiles, "kwantyle");
+                    ui.selectable_value(&mut a.stats_method, Method::NaturalBreaks, "naturalne");
+                    if before != a.stats_method {
+                        stats::reclassify(a.stats_method);
+                    }
+                });
+                ui.checkbox(&mut a.stats_bars, "Słupki 3D");
+                if reload {
+                    if let Some(v) = a.stats_var.clone() {
+                        stats::load(&a.stats, v, a.stats_level, a.stats_year, a.stats_method, ctx);
+                    }
+                }
+                if let Some(m) = stats::map() {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(&m.label).strong());
+                    ui.label(RichText::new(format!("{} · {} · {} jednostek · {}", m.level.label(), m.year, m.values.len(), m.unit)).small().color(theme::PAPER_3));
+                    let lo = m.values.values().fold(f64::MAX, |x, y| x.min(*y));
+                    let hi = m.values.values().fold(f64::MIN, |x, y| x.max(*y));
+                    for (i, c) in stats::PALETTE.iter().enumerate() {
+                        let from = if i == 0 { lo } else { m.breaks[i - 1] };
+                        let to = if i < stats::CLASSES - 1 { m.breaks[i] } else { hi };
+                        ui.horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(22.0, 12.0), egui::Sense::hover());
+                            ui.painter().rect_filled(r, 2.0, Color32::from_rgb(c[0], c[1], c[2]));
+                            ui.label(RichText::new(format!("{} – {}", fmt::dec(from, 2), fmt::dec(to, 2))).small());
+                        });
+                    }
+                    if ui.button("Usuń kartogram").clicked() {
+                        stats::clear_map();
+                        a.stats_var = None;
+                    }
+                }
+                let (busy, progress, error) = {
+                    let g = a.stats.lock().unwrap();
+                    (g.busy, g.progress, g.error.clone())
+                };
+                if busy {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        let t = progress.map_or("pobieranie…".to_string(), |(x, y)| format!("pobieranie {x} z {y}"));
+                        ui.label(RichText::new(t).small().color(theme::PAPER_3));
+                    });
+                }
+                if let Some(e) = error {
+                    ui.label(RichText::new(e).small().color(theme::WARN));
+                }
+                ui.separator();
+                let mut pick = None;
+                let r = ui.add(egui::TextEdit::singleline(&mut a.stats_query).hint_text("Szukaj wskaźnika, np. ludność, bezrobocie…").desired_width(f32::INFINITY));
+                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !a.stats_query.trim().is_empty() {
+                    stats::search(&a.stats, a.stats_query.trim(), ctx);
+                }
+                let found = a.stats.lock().unwrap().found.clone();
+                for v in found {
+                    variable_row(ui, &v, &mut pick);
+                }
+                ui.add_space(6.0);
+                ui.label(theme::kicker("Tematy"));
+                subject_tree(a, ui, "", &mut pick);
+                if let Some(v) = pick {
+                    // poziom ograniczony do tego, na którym wskaźnik istnieje
+                    if v.level < 6 && a.stats_level == Level::Commune {
+                        a.stats_level = Level::County;
+                    }
+                    if v.level < 5 {
+                        a.stats_level = Level::Voivodeship;
+                    }
+                    a.stats_var = Some(v.clone());
+                    stats::load(&a.stats, v, a.stats_level, a.stats_year, a.stats_method, ctx);
+                }
+            });
+        });
+    if !open {
+        a.stats_open = false;
+    }
+}
+
+fn variable_row(ui: &mut egui::Ui, v: &crate::stats::Variable, pick: &mut Option<crate::stats::Variable>) {
+    if ui.link(RichText::new(format!("{} [{}]", v.name, v.unit)).small()).clicked() {
+        *pick = Some(v.clone());
+    }
+}
+
+/// Drzewo tematów BDL, wczytywane przy rozwijaniu.
+fn subject_tree(a: &mut Atlas, ui: &mut egui::Ui, parent: &str, pick: &mut Option<crate::stats::Variable>) {
+    crate::stats::ask_subjects(&a.stats, parent, ui.ctx());
+    let list = a.stats.lock().unwrap().subjects.get(parent).cloned();
+    let Some(list) = list else {
+        ui.spinner();
+        return;
+    };
+    for s in list {
+        egui::CollapsingHeader::new(RichText::new(&s.name).small()).id_salt(("temat", &s.id)).show(ui, |ui| {
+            if s.has_vars {
+                crate::stats::ask_variables(&a.stats, &s.id, ui.ctx());
+                let vars = a.stats.lock().unwrap().variables.get(&s.id).cloned();
+                match vars {
+                    Some(vars) => {
+                        for v in &vars {
+                            variable_row(ui, v, pick);
+                        }
+                    }
+                    None => {
+                        ui.spinner();
+                    }
+                }
+            } else {
+                subject_tree(a, ui, &s.id, pick);
+            }
+        });
     }
 }
 
@@ -643,6 +793,11 @@ fn point_query_ui(a: &mut Atlas, ui: &mut egui::Ui, lon: f64, lat: f64) {
     if a.point_query.as_ref().is_none_or(|q| q.0 != key) {
         let info = crate::query::start(lon, lat, &key.2, ui.ctx().clone());
         a.point_query = Some((key, info));
+    }
+    if let Some((name, v, m)) = crate::stats::value_at(lon, lat) {
+        ui.add_space(6.0);
+        ui.label(theme::kicker(&format!("{} · {}", m.label, m.year)));
+        ui.label(RichText::new(format!("{name}: {} {}", fmt::dec(v, 2), m.unit)).strong());
     }
     let Some((_, info)) = &a.point_query else { return };
     let info = info.lock().unwrap();

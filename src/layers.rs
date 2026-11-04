@@ -104,6 +104,11 @@ pub fn catalog() -> &'static Catalog {
     })
 }
 
+/// Najniższy poziom warstwy (kartogram jest widoczny zawsze).
+pub fn min_z(i: u16) -> u8 {
+    catalog().layers.get(i as usize).map_or(0, |l| l.min_z)
+}
+
 pub fn index_of(id: &str) -> Option<u16> {
     catalog().layers.iter().position(|l| l.id == id).map(|i| i as u16)
 }
@@ -200,6 +205,9 @@ fn tile_path(root: &Path, id: &str, t: TileId) -> PathBuf {
 
 /// Kafel warstwy z dysku albo z usługi; `None` – kafel pusty (zapisany jako plik zerowy).
 pub fn load(root: &Path, i: u16, t: TileId) -> Option<image::RgbaImage> {
+    if i >= crate::stats::OVERLAY_BASE {
+        return crate::stats::render_tile(i, t);
+    }
     if !national::tile_in_poland(t) {
         return None;
     }

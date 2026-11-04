@@ -287,6 +287,14 @@ pub struct Atlas {
     pub search: Option<crate::ui::search::Search>,
     pub help: bool,
     pub layers_open: bool,
+    pub stats_open: bool,
+    pub stats_bars: bool,
+    pub stats_level: crate::stats::Level,
+    pub stats_year: i32,
+    pub stats_method: crate::stats::Method,
+    pub stats_query: String,
+    pub stats_var: Option<crate::stats::Variable>,
+    pub stats: crate::stats::Shared,
     pub feeds: crate::feeds::Hub,
     /// Punkty danych na żywo na ekranie w poprzedniej klatce.
     feed_hits: Vec<(Pos2, f32, &'static str, String)>,
@@ -371,6 +379,14 @@ impl Atlas {
             search: None,
             help: false,
             layers_open: false,
+            stats_open: false,
+            stats_bars: false,
+            stats_level: crate::stats::Level::County,
+            stats_year: 2023,
+            stats_method: crate::stats::Method::Quantiles,
+            stats_query: String::new(),
+            stats_var: None,
+            stats: Default::default(),
             feeds: Default::default(),
             feed_hits: Vec::new(),
             point_query: None,
@@ -1133,7 +1149,11 @@ impl Atlas {
 
         let scene = self.scene(&view);
         let lines = self.dyn_lines(&view);
-        let overlays = self.active_layers();
+        let mut overlays = self.active_layers();
+        if let Some(i) = crate::stats::overlay() {
+            // kartogram pod warstwami tematycznymi
+            overlays.insert(0, (i, 0.8));
+        }
         let ppp = ctx.pixels_per_point();
         if let Some(r) = &mut self.renderer {
             let key = self.snap.version * 1_000_000 + self.frame_version * 2 + self.prefs.trails as u64;
@@ -1550,6 +1570,35 @@ impl Atlas {
                 }
             }
         }
+        // słupki 3D kartogramu: wysokość z wartości, dalsze rysowane pierwsze
+        if self.stats_bars {
+            if let Some(m) = crate::stats::map() {
+                let max = m.values.values().fold(f64::MIN, |a, b| a.max(*b)).max(1e-9);
+                let top_m = match m.level {
+                    crate::stats::Level::Voivodeship => 90_000.0,
+                    crate::stats::Level::County => 50_000.0,
+                    crate::stats::Level::Commune => 25_000.0,
+                };
+                let mut bars: Vec<(f64, Pos2, Pos2, Color32)> = Vec::new();
+                for u in crate::stats::units(m.level) {
+                    let Some(v) = m.values.get(&u.teryt) else { continue };
+                    let e = self.heights.sample_cached(u.center[0], u.center[1]).unwrap_or(0.0);
+                    let base = self.local(u.center[0], u.center[1], e);
+                    let top = base + DVec3::Y * (v / max).max(0.0) * top_m;
+                    let (Some(a), Some(b)) = (view.project(base), view.project(top)) else { continue };
+                    let c = crate::stats::PALETTE[crate::stats::class_of(*v, &m.breaks)];
+                    bars.push((base.distance(view.eye), at(a), at(b), Color32::from_rgb(c[0], c[1], c[2])));
+                }
+                bars.sort_by(|x, y| y.0.total_cmp(&x.0));
+                let w = (2_400_000.0 / self.cam.distance.max(1.0)).clamp(3.0, 14.0) as f32;
+                for (_, a, b, c) in bars {
+                    if rect.contains(a) {
+                        p.line_segment([a, b], Stroke::new(w + 2.0, Color32::from_black_alpha(170)));
+                        p.line_segment([a, b], Stroke::new(w, c));
+                    }
+                }
+            }
+        }
         // dane na żywo: rozmiar i barwa z wartości, przy zagęszczeniu zostają najważniejsze
         let mut hits = Vec::new();
         for def in &crate::feeds::FEEDS {
@@ -1735,6 +1784,9 @@ impl Atlas {
         };
         // atrybucja włączonych warstw (wymagana licencjami)
         let mut sources: Vec<&str> = Vec::new();
+        if crate::stats::map().is_some() {
+            sources.push("GUS BDL · PRG © GUGiK");
+        }
         for def in &crate::feeds::FEEDS {
             if self.prefs.feeds.iter().any(|f| f == def.id) && !sources.contains(&def.attribution) {
                 sources.push(def.attribution);

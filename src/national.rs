@@ -28,7 +28,7 @@ fn coverage() -> &'static [Country] {
     })
 }
 
-fn in_ring(lon: f64, lat: f64, ring: &[[f64; 2]]) -> bool {
+pub fn in_ring(lon: f64, lat: f64, ring: &[[f64; 2]]) -> bool {
     let mut inside = false;
     let mut j = ring.len().wrapping_sub(1);
     for i in 0..ring.len() {
