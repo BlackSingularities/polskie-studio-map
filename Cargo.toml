@@ -1,11 +1,10 @@
 [package]
 name = "polskie-studio-map"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 rust-version = "1.85"
 description = "Polskie Studio Map — atlas warstw mapowych Polski 3D dla Windows"
 authors = ["BlackSingularities"]
-repository = "https://github.com/BlackSingularities/polskie-studio-map"
 build = "build.rs"
 
 [[bin]]

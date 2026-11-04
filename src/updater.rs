@@ -13,7 +13,7 @@ use sha2::{Digest, Sha512};
 
 use crate::download::agent;
 
-const FEED: &str = "https://redzikowski.com/api/github/repos/BlackSingularities/polskie-studio-map/releases/latest";
+const FEED: &str = "https://redzikowski.com/api/releases/repos/BlackSingularities/polskie-studio-map/releases/latest";
 
 #[derive(Clone, Debug)]
 pub struct Release {
