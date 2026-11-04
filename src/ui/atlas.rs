@@ -155,6 +155,8 @@ pub struct Prefs {
     pub camera: (f64, f64, f64, f64, f64, f64),
     pub panel_open: bool,
     pub layers: Vec<LayerState>,
+    /// Włączone dane na żywo.
+    pub feeds: Vec<String>,
 }
 
 impl Default for Prefs {
@@ -188,6 +190,7 @@ impl Default for Prefs {
             camera: (c.lon, c.lat, c.height, c.heading, c.pitch, c.distance),
             panel_open: false,
             layers: Vec::new(),
+            feeds: Vec::new(),
         }
     }
 }
@@ -198,6 +201,8 @@ pub enum Selection {
     Poi(usize),
     Point { lon: f64, lat: f64 },
     Trail(u32),
+    /// Punkt danych na żywo: (feed, klucz).
+    Feed(String, String),
 }
 
 /// Wynik analizy widoczności z punktu.
@@ -282,6 +287,9 @@ pub struct Atlas {
     pub search: Option<crate::ui::search::Search>,
     pub help: bool,
     pub layers_open: bool,
+    pub feeds: crate::feeds::Hub,
+    /// Punkty danych na żywo na ekranie w poprzedniej klatce.
+    feed_hits: Vec<(Pos2, f32, &'static str, String)>,
     /// Zapytanie o kliknięty punkt: (dł., szer., warstwy) i zbierane wyniki.
     pub point_query: Option<((f64, f64, Vec<u16>), Arc<std::sync::Mutex<crate::query::PointInfo>>)>,
     pub layer_query: String,
@@ -363,6 +371,8 @@ impl Atlas {
             search: None,
             help: false,
             layers_open: false,
+            feeds: Default::default(),
+            feed_hits: Vec::new(),
             point_query: None,
             layer_query: String::new(),
             user_presets: crate::layers::load_presets(),
@@ -1042,6 +1052,7 @@ impl Atlas {
             }
         }
         self.receive_jobs();
+        self.feeds.sync(&self.prefs.feeds, &ctx);
         let snap = self.world.snapshot();
         if snap.version != self.snap.version {
             self.snap = snap;
@@ -1263,6 +1274,16 @@ impl Atlas {
         if resp.clicked() {
             self.ctx_menu = None;
             let Some((lon, lat, _)) = self.hover else { return };
+            // punkt danych na żywo pod kursorem
+            if let (Some(p), Tool::Explore, Lens::None) = (pointer, self.tool, self.lens) {
+                let hit = self.feed_hits.iter().find(|h| (h.0 - p).length() <= h.1 + 4.0).map(|h| (h.2, h.3.clone()));
+                if let Some((id, key)) = hit {
+                    self.selection = Selection::Feed(id.to_string(), key);
+                    self.prefs.panel_open = true;
+                    self.tab = crate::ui::panels::Tab::Info;
+                    return;
+                }
+            }
             // etykieta pod kursorem
             if let Some(p) = pointer {
                 if let Some(i) = self.label_hit(p, rect, view) {
@@ -1529,6 +1550,30 @@ impl Atlas {
                 }
             }
         }
+        // dane na żywo: rozmiar i barwa z wartości, przy zagęszczeniu zostają najważniejsze
+        let mut hits = Vec::new();
+        for def in &crate::feeds::FEEDS {
+            if !self.prefs.feeds.iter().any(|f| f == def.id) {
+                continue;
+            }
+            let mut cells = std::collections::HashSet::new();
+            let close = self.cam.distance < 80_000.0;
+            for pt in self.feeds.points(def.id).iter() {
+                let e = self.heights.sample_cached(pt.lon, pt.lat).unwrap_or(0.0);
+                let Some(s) = view.project(self.local(pt.lon, pt.lat, e)) else { continue };
+                let sp = at(s);
+                if !rect.contains(sp) || !cells.insert(((sp.x / 18.0) as i32, (sp.y / 18.0) as i32)) {
+                    continue;
+                }
+                let c = Color32::from_rgb(pt.color[0], pt.color[1], pt.color[2]);
+                p.circle(sp, pt.radius, c, Stroke::new(1.0, Color32::from_black_alpha(200)));
+                if close && !pt.label.is_empty() {
+                    p.text(sp + Vec2::new(pt.radius + 3.0, 0.0), Align2::LEFT_CENTER, &pt.label, FontId::proportional(10.5), theme::PAPER);
+                }
+                hits.push((sp, pt.radius, def.id, pt.key.clone()));
+            }
+        }
+        self.feed_hits = hits;
         for (i, m) in self.measure.iter().enumerate() {
             if let Some(s) = view.project(self.local(m.0, m.1, m.2)) {
                 let sp = at(s);
@@ -1690,6 +1735,11 @@ impl Atlas {
         };
         // atrybucja włączonych warstw (wymagana licencjami)
         let mut sources: Vec<&str> = Vec::new();
+        for def in &crate::feeds::FEEDS {
+            if self.prefs.feeds.iter().any(|f| f == def.id) && !sources.contains(&def.attribution) {
+                sources.push(def.attribution);
+            }
+        }
         for (i, _) in self.active_layers() {
             let a = crate::layers::catalog().layers[i as usize].attribution.as_str();
             if !sources.contains(&a) {

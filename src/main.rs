@@ -8,6 +8,7 @@ mod analysis;
 mod app;
 mod bake;
 mod download;
+mod feeds;
 mod fmt;
 mod geo;
 mod gpx;

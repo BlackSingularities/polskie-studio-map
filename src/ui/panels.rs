@@ -167,6 +167,7 @@ pub fn layers_panel(a: &mut Atlas, ctx: &egui::Context) {
                     }
                 });
                 ui.add_space(6.0);
+                feeds_ui(a, ui);
                 active_layers_ui(a, ui);
                 let q = crate::ui::search::fold(a.layer_query.trim());
                 let mut groups: Vec<&str> = Vec::new();
@@ -199,6 +200,79 @@ pub fn layers_panel(a: &mut Atlas, ctx: &egui::Context) {
     if !open {
         a.layers_open = false;
     }
+}
+
+/// Dane na żywo: przełączniki, stan pobierania i ostrzeżenia.
+fn feeds_ui(a: &mut Atlas, ui: &mut egui::Ui) {
+    ui.label(theme::kicker("Na żywo"));
+    for def in &crate::feeds::FEEDS {
+        let mut on = a.prefs.feeds.iter().any(|f| f == def.id);
+        if ui.checkbox(&mut on, def.name).on_hover_text(format!("Źródło: {}", def.attribution)).changed() {
+            a.prefs.feeds.retain(|f| f != def.id);
+            if on {
+                a.prefs.feeds.push(def.id.to_string());
+            }
+        }
+        if !on {
+            continue;
+        }
+        let st = a.feeds.status(def.id);
+        let (t, c) = if let Some(e) = st.error {
+            (format!("serwis niedostępny: {e}"), theme::WARN)
+        } else if st.busy {
+            ("pobieranie…".to_string(), theme::PAPER_3)
+        } else {
+            (format!("{} · {} min temu", st.count, st.age_min.unwrap_or(0)), theme::PAPER_3)
+        };
+        ui.label(RichText::new(t).small().color(c));
+        for (title, body) in a.feeds.warnings(def.id).iter() {
+            egui::CollapsingHeader::new(RichText::new(title).small()).show(ui, |ui| {
+                ui.label(RichText::new(body).small());
+            });
+        }
+    }
+    ui.separator();
+}
+
+/// Punkt danych na żywo: wartości i przebieg od uruchomienia programu.
+fn feed_info(a: &mut Atlas, ui: &mut egui::Ui, id: &str, key: &str) {
+    let points = a.feeds.points(id);
+    let Some(p) = points.iter().find(|p| p.key == key) else {
+        a.selection = Selection::None;
+        return;
+    };
+    let source = crate::feeds::FEEDS.iter().find(|f| f.id == id).map_or("", |f| f.name);
+    close_row(a, ui, source);
+    ui.heading(&p.name);
+    if !p.label.is_empty() {
+        ui.label(RichText::new(&p.label).size(20.0).strong());
+    }
+    for (k, v) in &p.details {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(k).small().color(theme::PAPER_3));
+            ui.label(v);
+        });
+    }
+    let h = a.feeds.history(id, key);
+    ui.add_space(8.0);
+    ui.label(theme::kicker("Od uruchomienia programu"));
+    if h.len() < 2 {
+        theme::para(ui, "Wykres pojawi się po kolejnym odświeżeniu danych.");
+    } else {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 70.0), egui::Sense::hover());
+        let (lo, hi) = h.iter().fold((f32::MAX, f32::MIN), |m, v| (m.0.min(*v), m.1.max(*v)));
+        let span = (hi - lo).max(0.001);
+        let pts: Vec<egui::Pos2> = h
+            .iter()
+            .enumerate()
+            .map(|(i, v)| egui::pos2(rect.left() + rect.width() * i as f32 / (h.len() - 1) as f32, rect.bottom() - rect.height() * (v - lo) / span))
+            .collect();
+        ui.painter().add(egui::Shape::line(pts, egui::Stroke::new(2.0, theme::TEAL)));
+        ui.label(RichText::new(format!("od {lo:.1} do {hi:.1}")).small().color(theme::PAPER_3));
+    }
+    let (lon, lat) = (p.lon, p.lat);
+    ui.add_space(6.0);
+    point_buttons(a, ui, lon, lat);
 }
 
 /// Włączone warstwy od góry stosu.
@@ -369,6 +443,7 @@ fn info(a: &mut Atlas, ui: &mut egui::Ui) {
         Selection::Poi(i) => poi_info(a, ui, i),
         Selection::Point { lon, lat } => point_info(a, ui, lon, lat),
         Selection::Trail(e) => trail_info(a, ui, e),
+        Selection::Feed(id, key) => feed_info(a, ui, &id, &key),
         Selection::None => region_info(a, ui),
     }
 }
