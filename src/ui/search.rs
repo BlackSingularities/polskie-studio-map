@@ -1,5 +1,5 @@
 //! Wyszukiwarka (`/`): szczyty, schroniska, przełęcze i miejscowości z okolicy, szlaki (także po kolorze)
-//! oraz miejsca w całej Europie (Nominatim).
+//! oraz miejsca w Polsce (Nominatim).
 
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
@@ -180,7 +180,7 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
             if esc {
                 open = false;
             }
-            if enter && s.q.trim().starts_with("gran://") {
+            if enter && s.q.trim().starts_with("psm://") {
                 link = Some(s.q.trim().to_string());
             } else if enter && !hits.is_empty() {
                 choose = Some(match hits[s.sel].0 {
@@ -215,7 +215,7 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
                     ui.label(RichText::new(format!("Wyszukiwanie miejsc niedostępne: {e}")).small().color(theme::WARN));
                 }
                 if hits.is_empty() && q.len() >= 2 && s.pending.is_none() {
-                    theme::para(ui, "Brak wyników w okolicy. Wpisz co najmniej 3 litery, żeby szukać w całej Europie.");
+                    theme::para(ui, "Brak wyników w okolicy. Wpisz co najmniej 3 litery, żeby szukać w całej Polsce.");
                 }
             });
         });
@@ -224,7 +224,7 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
         if a.apply_link(&l) {
             open = false;
         } else {
-            a.notify("Nieprawidłowy link GRANIA.");
+            a.notify("Nieprawidłowy link do widoku.");
         }
     }
     match choose {

@@ -4,12 +4,10 @@ use eframe::egui::{self, Color32, RichText};
 
 use crate::fmt;
 use crate::geo::{bearing, haversine};
-use crate::graph::RouteKind;
-use crate::metrics::{self, TimeModel, DIFFICULTY, SAC_LABEL};
+use crate::metrics::{self, SAC_LABEL};
 use crate::osm::PoiKind;
 use crate::sun::{self, Day};
-use crate::ui::atlas::{Atlas, Lens, Quality, RouteMode, Selection, Style, Tool};
-use crate::ui::profile;
+use crate::ui::atlas::{Atlas, Lens, Quality, Selection, Style, Tool};
 use crate::ui::theme;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,7 +50,7 @@ pub fn search_pill(a: &mut Atlas, ctx: &egui::Context) {
         .show(ctx, |ui| {
             theme::glass().show(ui, |ui| {
                 ui.set_width(RAIL_X + DRAWER_W - 28.0);
-                if theme::row_button(ui, theme::icon::MAGNIFYING_GLASS, "Szukaj szczytu, szlaku, miejscowości", false).on_hover_text("/").clicked() {
+                if theme::row_button(ui, theme::icon::MAGNIFYING_GLASS, "Szukaj miejsca, szczytu, szlaku", false).on_hover_text("/").clicked() {
                     a.search = Some(Default::default());
                 }
             });
@@ -61,7 +59,6 @@ pub fn search_pill(a: &mut Atlas, ctx: &egui::Context) {
 
 const RAIL_X: f32 = 16.0;
 const TOP_Y: f32 = 76.0;
-const DRAWER_X: f32 = 82.0;
 const DRAWER_W: f32 = 372.0;
 
 /// Pionowy pasek narzędzi po lewej.
@@ -80,12 +77,7 @@ pub fn rail(a: &mut Atlas, ctx: &egui::Context) {
                         open_tab(a, Tab::Info);
                     }
                     ui.separator();
-                    if theme::icon_button(ui, theme::icon::PATH, a.tool == Tool::Route).on_hover_text("Planowanie trasy (2)").clicked() {
-                        a.tool = if a.tool == Tool::Route { Tool::Explore } else { Tool::Route };
-                        a.prefs.panel_open = true;
-                        a.tab = Tab::Info;
-                    }
-                    if theme::icon_button(ui, theme::icon::RULER, a.tool == Tool::Measure).on_hover_text("Pomiar i linia wzroku (3)").clicked() {
+                    if theme::icon_button(ui, theme::icon::RULER, a.tool == Tool::Measure).on_hover_text("Pomiar i linia wzroku (2)").clicked() {
                         a.tool = if a.tool == Tool::Measure { Tool::Explore } else { Tool::Measure };
                         a.prefs.panel_open = true;
                         a.tab = Tab::Info;
@@ -108,9 +100,6 @@ pub fn rail(a: &mut Atlas, ctx: &egui::Context) {
                             let (lon, lat) = (a.cam.lon, a.cam.lat);
                             a.enter_panorama(lon, lat);
                         }
-                    }
-                    if theme::icon_button(ui, theme::icon::AIRPLANE_TILT, a.flight.is_some()).on_hover_text("Przelot nad trasą (F)").clicked() {
-                        a.toggle_flight();
                     }
                 });
             });
@@ -206,7 +195,6 @@ fn info(a: &mut Atlas, ui: &mut egui::Ui) {
         return lens_info(a, ui);
     }
     match a.tool {
-        Tool::Route => return route_info(a, ui),
         Tool::Measure => return measure_info(a, ui),
         Tool::Explore => {}
     }
@@ -229,7 +217,7 @@ fn region_info(a: &mut Atlas, ui: &mut egui::Ui) {
             haversine(a.cam.lon, a.cam.lat, x.poi.lon, x.poi.lat).total_cmp(&haversine(a.cam.lon, a.cam.lat, y.poi.lon, y.poi.lat))
         })
         .map(|p| format!("Okolice: {}", p.poi.name))
-        .unwrap_or_else(|| "Atlas szlaków".into());
+        .unwrap_or_else(|| "Polska".into());
     ui.heading(name);
     let g = &a.snap.graph;
     if g.edges.is_empty() {
@@ -270,33 +258,11 @@ fn region_info(a: &mut Atlas, ui: &mut egui::Ui) {
             a.fly_to(lon, lat, Some(a.cam.distance.clamp(2500.0, 9000.0)));
         }
     }
-    if let Some(r) = a.gpx.clone() {
-        ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            ui.label(theme::kicker("Wczytany ślad GPX"));
-        });
-        let s = r.stats;
-        ui.label(RichText::new(r.labels[0].clone()).strong());
-        grid2(ui, vec![("Dystans", fmt::dist(s.len2)), ("Czas", fmt::time(s.time)), ("Podejścia", fmt::ele(s.up)), ("Zejścia", fmt::ele(s.down))]);
-        ui.horizontal(|ui| {
-            if ui.button("Pokaż").clicked() {
-                a.fit_route(&r);
-            }
-            if ui.button("Usuń").clicked() {
-                a.gpx = None;
-            }
-        });
-    }
     ui.add_space(10.0);
     if theme::row_button(ui, theme::icon::LINK, "Kopiuj link do widoku", false).clicked() {
         let l = a.share_link();
         ui.ctx().copy_text(l);
-        a.notify("Skopiowano link do widoku – wklej go do wyszukiwarki GRANI albo otwórz w systemie.");
-    }
-    if theme::row_button(ui, theme::icon::FILE_ARROW_UP, "Wczytaj ślad GPX…", false).on_hover_text("albo przeciągnij plik .gpx na mapę").clicked() {
-        if let Some(p) = rfd::FileDialog::new().add_filter("GPX", &["gpx"]).pick_file() {
-            a.import_gpx(&p);
-        }
+        a.notify("Skopiowano link do widoku – wklej go do wyszukiwarki programu albo otwórz w systemie.");
     }
 }
 
@@ -318,14 +284,6 @@ fn row(ui: &mut egui::Ui, name: &str, right: &str, sub: &str) -> bool {
 }
 
 fn point_buttons(a: &mut Atlas, ui: &mut egui::Ui, lon: f64, lat: f64) {
-    if theme::row_button(ui, theme::icon::FLAG, "Trasa stąd", false).clicked() {
-        a.tool = Tool::Route;
-        a.add_waypoint(lon, lat, Some(0));
-    }
-    if theme::row_button(ui, theme::icon::MAP_PIN, "Trasa tutaj", false).clicked() {
-        a.tool = Tool::Route;
-        a.add_waypoint(lon, lat, None);
-    }
     if theme::row_button(ui, theme::icon::EYE, "Co widać stąd?", false).clicked() {
         a.pin_lens(lon, lat, Lens::Vis);
     }
@@ -484,187 +442,6 @@ fn trail_info(a: &mut Atlas, ui: &mut egui::Ui, e: u32) {
             }
         }
     });
-}
-
-fn time_model(a: &mut Atlas, ui: &mut egui::Ui) {
-    let (mut m, mut pace) = metrics::model();
-    let before = (m, pace);
-    ui.horizontal(|ui| {
-        ui.selectable_value(&mut m, TimeModel::Pttk, "reguła PTTK");
-        ui.selectable_value(&mut m, TimeModel::Din, "DIN 33466");
-    });
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Tempo").color(theme::PAPER_3));
-        ui.selectable_value(&mut pace, 0.8, "szybkie");
-        ui.selectable_value(&mut pace, 1.0, "normalne");
-        ui.selectable_value(&mut pace, 1.25, "spokojne");
-    });
-    if (m, pace) != before {
-        metrics::set_model(m, pace);
-        a.prefs.din = m == TimeModel::Din;
-        a.prefs.pace = pace;
-        a.mark_route_dirty();
-    }
-}
-
-fn route_info(a: &mut Atlas, ui: &mut egui::Ui) {
-    ui.label(theme::kicker("Planowanie trasy"));
-    ui.heading(if a.route_mode == RouteMode::Trails { "Trasa szlakami" } else { "Trasa przez teren" });
-    let before = a.route_mode;
-    ui.horizontal(|ui| {
-        ui.selectable_value(&mut a.route_mode, RouteMode::Trails, "Szlakami");
-        ui.selectable_value(&mut a.route_mode, RouteMode::Terrain, "Przez teren")
-            .on_hover_text("A* po modelu terenu z funkcją Toblera i limitem nachylenia – analiza rzeźby, nie zachęta do schodzenia ze szlaków w parkach narodowych.");
-    });
-    if before != a.route_mode {
-        a.mark_route_dirty();
-    }
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        ui.label(theme::kicker("Punkty"));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if !a.waypoints.is_empty() {
-                if ui.small_button("Wyczyść").clicked() {
-                    a.clear_route();
-                }
-                if ui.small_button("Odwróć").clicked() {
-                    a.reverse_route();
-                }
-            }
-        });
-    });
-    if a.waypoints.is_empty() {
-        theme::para(ui, "Klikaj na mapie, żeby dodać punkty trasy (start, przez, cel). Punkty można przeciągać; prawy przycisk daje więcej opcji.");
-    }
-    let mut remove = None;
-    let n = a.waypoints.len();
-    for (i, w) in a.waypoints.iter().enumerate() {
-        ui.horizontal(|ui| {
-            let tag = if i == 0 { "A".to_string() } else if i == n - 1 { "B".to_string() } else { i.to_string() };
-            ui.label(RichText::new(tag).strong().color(theme::BRASS));
-            ui.label(w.name.clone().unwrap_or_else(|| fmt::decimal(w.lon, w.lat)));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button(theme::icon::X).clicked() {
-                    remove = Some(i);
-                }
-                ui.label(RichText::new(fmt::ele(w.e as f64)).monospace().small().color(theme::PAPER_3));
-            });
-        });
-    }
-    if let Some(i) = remove {
-        a.remove_waypoint(i);
-    }
-    ui.add_space(6.0);
-    ui.label(theme::kicker("Czas przejścia"));
-    time_model(a, ui);
-    if a.routing {
-        ui.horizontal(|ui| {
-            ui.spinner();
-            ui.label(RichText::new("wyznaczam trasę…").color(theme::PAPER_3));
-        });
-    }
-    if let Some(e) = &a.route_error {
-        ui.label(RichText::new(e).color(theme::WARN));
-    }
-    if !a.routes.is_empty() {
-        ui.add_space(8.0);
-        ui.label(theme::kicker(&format!("Warianty ({})", a.routes.len())));
-        let base_t = a.routes[0].stats.time;
-        let mut pick = None;
-        for (i, r) in a.routes.iter().enumerate() {
-            let sel = i == a.route_sel;
-            let resp = theme::card(sel).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(r.labels.join(" · ")).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(fmt::time(r.stats.time)).strong());
-                    });
-                });
-                let d = r.stats.time - base_t;
-                let diff = if i > 0 && d.abs() > 0.04 { format!(" · {}{}", if d > 0.0 { "+" } else { "−" }, fmt::time(d.abs())) } else { String::new() };
-                theme::para(ui, format!("{} · ↑ {} · ↓ {}{diff}", fmt::dist(r.stats.len2), fmt::ele(r.stats.up), fmt::ele(r.stats.down)));
-            });
-            if resp.response.interact(egui::Sense::click()).clicked() {
-                pick = Some(i);
-            }
-        }
-        if let Some(i) = pick {
-            a.route_sel = i;
-        }
-        if let Some(r) = a.routes.get(a.route_sel).cloned() {
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label(theme::kicker("Szczegóły wariantu"));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let c = [theme::OK, theme::WARN, theme::SIGNAL, Color32::from_rgb(190, 80, 200)][r.stats.difficulty.min(3)];
-                    ui.label(RichText::new(DIFFICULTY[r.stats.difficulty.min(3)]).color(c));
-                });
-            });
-            let s = r.stats;
-            let mut items = vec![
-                ("Dystans", fmt::dist(s.len2)),
-                ("Po powierzchni", fmt::dist(s.len3)),
-                ("Podejścia", fmt::ele(s.up)),
-                ("Zejścia", fmt::ele(s.down)),
-                ("Czas", fmt::time(s.time)),
-                ("Najwyżej", fmt::ele(s.max_ele)),
-                ("Najniżej", fmt::ele(s.min_ele)),
-                ("Maks. nachylenie", format!("{}°", s.max_slope.round())),
-                ("Linia prosta", fmt::dist(s.straight)),
-                ("Krętość", format!("×{}", fmt::dec(s.len2 / s.straight.max(1.0), 2))),
-            ];
-            if r.kind == RouteKind::Trail {
-                items.push(("Punkty GOT", fmt::int(s.got)));
-                items.push(("Skala SAC", SAC_LABEL[s.sac_max.min(6) as usize].split(' ').next().unwrap_or("—").to_string()));
-            }
-            grid2(ui, items);
-            if !r.route_refs.is_empty() {
-                ui.add_space(6.0);
-                ui.label(theme::kicker("Szlaki na trasie"));
-                for &ri in r.route_refs.iter().take(10) {
-                    if let Some(info) = a.snap.graph.routes.get(ri as usize) {
-                        ui.horizontal(|ui| {
-                            let c = crate::metrics::TrailColor::parse(&info.color).rgb();
-                            let (rect, _) = ui.allocate_exact_size(egui::vec2(20.0, 6.0), egui::Sense::hover());
-                            ui.painter().rect_filled(rect, 3.0, Color32::from_rgb(c[0], c[1], c[2]));
-                            ui.label(RichText::new(&info.name).small());
-                        });
-                    }
-                }
-            }
-        }
-    }
-    if a.current_route().is_some() {
-        ui.add_space(8.0);
-        if theme::row_button(ui, theme::icon::ARROWS_OUT, "Pokaż całą", false).clicked() {
-            if let Some(r) = a.current_route().cloned() {
-                a.fit_route(&r);
-            }
-        }
-        let profile_open = a.prefs.profile_open;
-        if theme::row_button(ui, theme::icon::CHART_LINE, "Profil wysokości", profile_open).clicked() {
-            a.prefs.profile_open = !profile_open;
-        }
-        if theme::row_button(ui, theme::icon::LINK, "Kopiuj link", false).on_hover_text("Link gran:// z widokiem i punktami trasy").clicked() {
-            let l = a.share_link();
-            ui.ctx().copy_text(l);
-            a.notify("Skopiowano link z trasą.");
-        }
-        if theme::row_button(ui, theme::icon::EXPORT, "Eksport GPX", false).on_hover_text("G").clicked() {
-            a.export_gpx();
-        }
-        let flying = a.flight.is_some();
-        if theme::row_button(ui, theme::icon::AIRPLANE_TILT, if flying { "Zatrzymaj przelot" } else { "Przelot" }, flying).on_hover_text("F").clicked() {
-            a.toggle_flight();
-        }
-    }
-    ui.add_space(8.0);
-    if theme::row_button(ui, theme::icon::FILE_ARROW_UP, "Wczytaj ślad GPX…", false).clicked() {
-        if let Some(p) = rfd::FileDialog::new().add_filter("GPX", &["gpx"]).pick_file() {
-            a.import_gpx(&p);
-        }
-    }
 }
 
 fn measure_info(a: &mut Atlas, ui: &mut egui::Ui) {
@@ -874,7 +651,7 @@ fn style_tab(a: &mut Atlas, ui: &mut egui::Ui) {
         Style::Slope => Some("Klasy nachylenia jak na mapach lawinowych: 15–25° · 25–30° · 30–35° · 35–40° · 40–45° · ponad 45°."),
         Style::Aspect => Some("Barwa – kierunek, w który opada stok; nasycenie – nachylenie."),
         Style::Hypso => Some("Barwy wysokości: niziny zielone, piętro hal brązowe, najwyżej biel."),
-        Style::Satellite => Some("Sentinel-2 cloudless 2020 (EOX) – 10 m; z bliska ortofotomapa GUGiK, ČÚZK i ZBGIS."),
+        Style::Satellite => Some("Sentinel-2 cloudless 2020 (EOX) – 10 m; z bliska ortofotomapa GUGiK."),
         _ => None,
     };
     if let Some(l) = legend {
@@ -892,7 +669,7 @@ fn layers_tab(a: &mut Atlas, ui: &mut egui::Ui) {
     theme::switch(ui, &mut a.prefs.shadows, "Cienie rzeźby");
     theme::switch(ui, &mut a.prefs.detail, "Drobna rzeźba (mapa normalnych)");
     theme::switch(ui, &mut a.prefs.snow, "Śnieg");
-    theme::switch(ui, &mut a.prefs.ortho, "Ortofoto (PL, CZ, SK)");
+    theme::switch(ui, &mut a.prefs.ortho, "Ortofoto GUGiK");
     theme::switch(ui, &mut a.prefs.landcover, "Pokrycie terenu z OSM");
     ui.add_space(10.0);
     ui.add(egui::Slider::new(&mut a.prefs.label_density, 0.3..=2.0).text("gęstość nazw"));
@@ -989,66 +766,12 @@ pub fn graphics(a: &mut Atlas, ui: &mut egui::Ui) {
     }
 }
 
-/// Profil wysokości na dole okna.
-pub fn profile_panel(a: &mut Atlas, ctx: &egui::Context) {
-    if !a.prefs.profile_open {
-        a.profile_cursor = a.flight.as_ref().map(|f| f.dist);
-        return;
-    }
-    let Some(route) = a.current_route().cloned() else {
-        // profil pomiaru (2+ punktów)
-        a.profile_cursor = None;
-        return;
-    };
-    let screen = ctx.screen_rect();
-    let left = DRAWER_X;
-    let size = egui::vec2((screen.width() - left - 90.0 - right_inset(a)).max(320.0), 170.0);
-    egui::Area::new(egui::Id::new("profil"))
-        .fixed_pos([left, screen.bottom() - size.y - 56.0])
-        .show(ctx, |ui| {
-            theme::glass().inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
-            ui.set_min_size(size);
-            ui.set_max_size(size);
-            ui.horizontal(|ui| {
-                ui.label(theme::kicker("Profil wysokości"));
-                let s = route.stats;
-                theme::para(ui, format!("{} · ↑ {} · ↓ {} · {}", fmt::dist(s.len2), fmt::ele(s.up), fmt::ele(s.down), fmt::time(s.time)));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button(theme::icon::X).clicked() {
-                        a.prefs.profile_open = false;
-                    }
-                });
-            });
-            let others: Vec<&crate::graph::Route> = a.routes.iter().enumerate().filter(|(i, _)| *i != a.route_sel).map(|(_, r)| r).collect();
-            // mijane punkty (szczyty, przełęcze, schroniska w pobliżu śladu)
-            let tr = &route.track;
-            let mut marks = Vec::new();
-            for p in a.snap.pois.iter().filter(|p| matches!(p.poi.kind, PoiKind::Peak | PoiKind::Saddle | PoiKind::Hut | PoiKind::Shelter)).take(800) {
-                let mut best = (f64::INFINITY, 0usize);
-                for i in (0..tr.len()).step_by(3) {
-                    let d = haversine(tr.lon[i], tr.lat[i], p.poi.lon, p.poi.lat);
-                    if d < best.0 {
-                        best = (d, i);
-                    }
-                }
-                if best.0 < 90.0 {
-                    marks.push(profile::Mark { dist: tr.d2[best.1], label: p.poi.name.clone() });
-                }
-            }
-            marks.sort_by(|x, y| x.dist.total_cmp(&y.dist));
-            let cursor = a.flight.as_ref().map(|f| f.dist).or(a.profile_cursor);
-            let h = profile::show(ui, &route, &others, &marks, cursor, None);
-            a.profile_cursor = h.or(a.flight.as_ref().map(|f| f.dist));
-            });
-        });
-}
-
 pub fn help(a: &mut Atlas, ctx: &egui::Context) {
     if !a.help {
         return;
     }
     let rows = [
-        ("1 – 3", "eksploracja · trasa · pomiar"),
+        ("1  2", "eksploracja · pomiar"),
         ("H  W  O", "soczewka: ta sama wysokość · względna · widoczność"),
         ("/", "wyszukiwarka"),
         ("M", "następny styl mapy"),
@@ -1057,13 +780,11 @@ pub fn help(a: &mut Atlas, ctx: &egui::Context) {
         ("klik z soczewką / Esc", "przypnij / odepnij soczewkę"),
         ("+  −", "przewyższenie terenu"),
         ("[  ]", "pora dnia −/+ 30 min"),
-        ("F", "przelot nad trasą"),
         ("N", "północ u góry"),
         ("V", "widok z góry / ukośny"),
         ("R", "widok początkowy"),
-        ("G", "eksport GPX"),
         ("S", "zrzut ekranu PNG"),
-        ("⌫", "usuń ostatni punkt"),
+        ("⌫", "usuń ostatni punkt pomiaru"),
         ("Esc", "anuluj / wyjdź"),
         ("strzałki · Q E · PgUp PgDn", "przesuwanie · obrót · nachylenie"),
         ("lewy przycisk", "przesuwanie (chwyć teren)"),
@@ -1073,14 +794,14 @@ pub fn help(a: &mut Atlas, ctx: &egui::Context) {
         ("Ctrl+,", "ustawienia"),
     ];
     let mut open = true;
-    egui::Window::new("Jak korzystać z Grani")
+    egui::Window::new("Jak korzystać z programu")
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .open(&mut open)
         .show(ctx, |ui| {
             ui.set_width(560.0);
-            theme::para(ui, "Atlas łączy rzeczywisty model terenu z siecią szlaków OSM. Wszystkie obliczenia – trasy, widoczność, cienie – odbywają się lokalnie na tym komputerze.");
+            theme::para(ui, "Atlas łączy rzeczywisty model terenu Polski z danymi OSM. Wszystkie obliczenia – widoczność, cienie – odbywają się lokalnie na tym komputerze.");
             ui.add_space(8.0);
             egui::Grid::new("skroty").num_columns(2).striped(true).spacing([24.0, 6.0]).show(ui, |ui| {
                 for (k, v) in rows {
@@ -1089,8 +810,6 @@ pub fn help(a: &mut Atlas, ctx: &egui::Context) {
                     ui.end_row();
                 }
             });
-            ui.add_space(8.0);
-            theme::para(ui, "Pliki .gpx możesz przeciągnąć bezpośrednio na mapę.");
         });
     if !open {
         a.help = false;

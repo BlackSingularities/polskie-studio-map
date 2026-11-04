@@ -7,7 +7,7 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::graph::TrailGraph;
+use crate::trails::TrailGraph;
 use crate::heights::Heights;
 use crate::osm::{self, Poi, PoiKind, SectorData, SectorId};
 
@@ -148,7 +148,7 @@ impl World {
         self.snap.read().unwrap().clone()
     }
 
-    /// Zestaw sektorów, które mają być wczytane (okolica kamery i punktów trasy).
+    /// Zestaw sektorów, które mają być wczytane (okolica kamery).
     /// Kolejność listy to kolejność wczytywania: najpierw to, na co patrzy kamera.
     pub fn want(&self, list: Vec<SectorId>) {
         let mut seen = HashSet::new();
@@ -340,7 +340,11 @@ impl World {
         let refs: Vec<&SectorData> = sectors.iter().map(|s| &*s.1).collect();
         let graph = TrailGraph::build(&refs, &height);
         use rayon::prelude::*;
-        let raw: Vec<&Poi> = refs.iter().flat_map(|s| s.pois.iter()).collect();
+        let raw: Vec<&Poi> = refs
+            .iter()
+            .flat_map(|s| s.pois.iter())
+            .filter(|p| crate::national::in_poland(p.lon, p.lat))
+            .collect();
         let mut pois: Vec<PoiView> = raw
             .par_iter()
             .map(|p| {

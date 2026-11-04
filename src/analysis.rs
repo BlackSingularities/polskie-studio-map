@@ -1,8 +1,5 @@
-//! Analizy na lokalnej siatce wysokości: pole widoczności, linia wzroku, trasa przez teren (A*),
+//! Analizy na lokalnej siatce wysokości: pole widoczności, linia wzroku,
 //! cienie rzucane przez rzeźbę i statystyki wysokości względnej.
-
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
 
 use rayon::prelude::*;
 
@@ -115,127 +112,6 @@ pub fn line_of_sight(g: &Grid, a: (f64, f64), b: (f64, f64), eye: f32) -> Option
     None
 }
 
-/// Czas marszu wg funkcji Toblera (s) dla odcinka o długości poziomej `d` i przewyższeniu `dh`.
-fn tobler(d: f32, dh: f32) -> f32 {
-    let v = 6.0 * (-3.5 * (dh / d + 0.05).abs()).exp();
-    d.hypot(dh) / 1000.0 / v * 3600.0
-}
-
-#[derive(Copy, Clone, PartialEq)]
-struct Item(f32, u32);
-impl Eq for Item {}
-impl Ord for Item {
-    fn cmp(&self, o: &Self) -> Ordering {
-        o.0.partial_cmp(&self.0).unwrap_or(Ordering::Equal)
-    }
-}
-impl PartialOrd for Item {
-    fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
-        Some(self.cmp(o))
-    }
-}
-
-/// Trasa przez teren: A* po siatce (16 kierunków), funkcja Toblera, limit nachylenia.
-pub fn terrain_path(g: &Grid, a: (f64, f64), b: (f64, f64), max_slope_deg: f32) -> Option<Vec<(f64, f64)>> {
-    let (w, h) = (g.w, g.h);
-    let n = w * h;
-    let mut cost = vec![f32::INFINITY; n];
-    let mut from = vec![u32::MAX; n];
-    let mut closed = vec![false; n];
-    let max_tan = max_slope_deg.to_radians().tan();
-    let idx = |p: (f64, f64)| {
-        (p.1.round().clamp(0.0, (h - 1) as f64) as usize) * w
-            + p.0.round().clamp(0.0, (w - 1) as f64) as usize
-    };
-    let (s, t) = (idx(a), idx(b));
-    let (tx, ty) = ((t % w) as f32, (t / w) as f32);
-    let vmax = 6.0 * (-3.5f32 * 0.05).exp() / 3.6;
-    let mpp = g.mpp;
-    let hcost = |i: usize| ((i % w) as f32 - tx).hypot((i / w) as f32 - ty) * mpp / vmax;
-    let mut heap = BinaryHeap::new();
-    cost[s] = 0.0;
-    heap.push(Item(hcost(s), s as u32));
-    const DX: [i32; 16] = [1, -1, 0, 0, 1, 1, -1, -1, 2, 2, -2, -2, 1, 1, -1, -1];
-    const DY: [i32; 16] = [0, 0, 1, -1, 1, -1, 1, -1, 1, -1, 1, -1, 2, -2, 2, -2];
-    let mut found = false;
-    let mut iter = 0;
-    while let Some(Item(_, u)) = heap.pop() {
-        let u = u as usize;
-        if closed[u] {
-            continue;
-        }
-        closed[u] = true;
-        if u == t {
-            found = true;
-            break;
-        }
-        iter += 1;
-        if iter > 6_000_000 {
-            break;
-        }
-        let (ux, uy) = ((u % w) as i32, (u / w) as i32);
-        let hu = g.data[u];
-        for k in 0..16 {
-            let (vx, vy) = (ux + DX[k], uy + DY[k]);
-            if vx < 0 || vy < 0 || vx >= w as i32 || vy >= h as i32 {
-                continue;
-            }
-            let v = vy as usize * w + vx as usize;
-            if closed[v] {
-                continue;
-            }
-            let d = (DX[k] as f32).hypot(DY[k] as f32) * mpp;
-            let dh = g.data[v] - hu;
-            if k >= 8 {
-                let mid = g.sample(ux as f64 + DX[k] as f64 / 2.0, uy as f64 + DY[k] as f64 / 2.0);
-                if (mid - hu).abs() / (d / 2.0) > max_tan || (g.data[v] - mid).abs() / (d / 2.0) > max_tan {
-                    continue;
-                }
-            } else if dh.abs() / d > max_tan {
-                continue;
-            }
-            let nc = cost[u] + tobler(d, dh);
-            if nc < cost[v] {
-                cost[v] = nc;
-                from[v] = u as u32;
-                heap.push(Item(nc + hcost(v), v as u32));
-            }
-        }
-    }
-    if !found {
-        return None;
-    }
-    let mut path = Vec::new();
-    let mut v = t;
-    while v != u32::MAX as usize {
-        path.push(((v % w) as f64, (v / w) as f64));
-        v = from[v] as usize;
-    }
-    path.reverse();
-    // wygładzenie zygzaków siatki
-    for _ in 0..3 {
-        if path.len() < 3 {
-            break;
-        }
-        let mut q = vec![path[0]];
-        for i in 1..path.len() - 1 {
-            q.push((
-                (path[i - 1].0 + 2.0 * path[i].0 + path[i + 1].0) / 4.0,
-                (path[i - 1].1 + 2.0 * path[i].1 + path[i + 1].1) / 4.0,
-            ));
-        }
-        q.push(*path.last().unwrap());
-        path = q;
-    }
-    if let Some(f) = path.first_mut() {
-        *f = a;
-    }
-    if let Some(l) = path.last_mut() {
-        *l = b;
-    }
-    Some(path)
-}
-
 /// Cienie rzucane przez rzeźbę (Słońce w kierunku `sun` = [wschód, góra, południe]).
 /// Maska 0 – cień, 255 – słońce (miękka krawędź z zapasu kąta).
 pub fn shadows(g: &Grid, sun: [f32; 3]) -> Vec<u8> {
@@ -339,13 +215,6 @@ mod tests {
         assert_eq!(v.mask[50 * 101 + 90], 0);
         assert!(line_of_sight(&g, (10.0, 50.0), (90.0, 50.0), 1.7).is_some());
         assert!(line_of_sight(&g, (10.0, 50.0), (10.0, 90.0), 1.7).is_none());
-    }
-
-    #[test]
-    fn path_goes_around_steep_cone() {
-        let g = cone();
-        let p = terrain_path(&g, (5.0, 50.0), (95.0, 50.0), 30.0).unwrap();
-        assert!(p.len() > 10);
     }
 
     #[test]

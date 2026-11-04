@@ -13,7 +13,7 @@ use sha2::{Digest, Sha512};
 
 use crate::download::agent;
 
-const FEED: &str = "https://redzikowski.com/api/github/repos/BlackSingularities/gran-3d/releases/latest";
+const FEED: &str = "https://redzikowski.com/api/github/repos/BlackSingularities/polskie-studio-map/releases/latest";
 
 #[derive(Clone, Debug)]
 pub struct Release {
@@ -64,7 +64,7 @@ pub fn latest() -> Result<Release, String> {
         .iter()
         .find(|a| {
             let n = a["name"].as_str().unwrap_or("");
-            n.starts_with("GRAN-Setup-") && n.to_lowercase().ends_with(".exe")
+            n.starts_with("PSM-Setup-") && n.to_lowercase().ends_with(".exe")
         })
         .ok_or("Wydanie nie zawiera instalatora.")?;
     let yml = assets.iter().find(|a| a["name"] == "latest.yml");
@@ -100,7 +100,7 @@ pub fn parse_sha(yml: &str, name: &str) -> Option<String> {
 /// Pobranie instalatora do katalogu tymczasowego (postęp w bajtach) i sprawdzenie sumy.
 pub fn download(rel: &Release, progress: Arc<AtomicU64>) -> Result<PathBuf, String> {
     let sha = expected_sha(rel)?;
-    let dir = std::env::temp_dir().join("GRAN-aktualizacja");
+    let dir = std::env::temp_dir().join("PSM-aktualizacja");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let file = dir.join(&rel.exe_name);
@@ -160,7 +160,7 @@ pub fn run_installer(file: &std::path::Path) -> Result<(), String> {
 
 /// Pozostałość po poprzedniej aktualizacji.
 pub fn cleanup() {
-    let _ = std::fs::remove_dir_all(std::env::temp_dir().join("GRAN-aktualizacja"));
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join("PSM-aktualizacja"));
 }
 
 #[cfg(test)]
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn sha_from_yml() {
-        let yml = "version: 2.0.0\nfiles:\n  - url: GRAN-Setup-2.0.0.exe\n    sha512: abc+/=\n    size: 10\npath: GRAN-Setup-2.0.0.exe\nsha512: xyz\n";
-        assert_eq!(parse_sha(yml, "GRAN-Setup-2.0.0.exe").as_deref(), Some("abc+/="));
+        let yml = "version: 2.0.0\nfiles:\n  - url: PSM-Setup-2.0.0.exe\n    sha512: abc+/=\n    size: 10\npath: PSM-Setup-2.0.0.exe\nsha512: xyz\n";
+        assert_eq!(parse_sha(yml, "PSM-Setup-2.0.0.exe").as_deref(), Some("abc+/="));
     }
 }

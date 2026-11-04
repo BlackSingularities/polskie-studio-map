@@ -57,12 +57,12 @@ pub struct Camera {
 impl Default for Camera {
     fn default() -> Self {
         Camera {
-            lon: 19.98,
-            lat: 49.20,
-            height: 1400.0,
-            heading: 170.0,
-            pitch: 38.0,
-            distance: 24_000.0,
+            lon: 19.2,
+            lat: 52.0,
+            height: 150.0,
+            heading: 0.0,
+            pitch: 55.0,
+            distance: 700_000.0,
             fov_y: 45.0,
         }
     }

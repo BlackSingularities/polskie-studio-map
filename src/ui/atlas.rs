@@ -1,5 +1,5 @@
-//! Atlas 3D: kamera nad terenem, narzędzia (eksploracja, trasa, pomiar), soczewki, analizy w tle,
-//! etykiety, znaczniki i profil. Panele boczne – w `panels.rs`.
+//! Atlas 3D: kamera nad terenem Polski, narzędzia (eksploracja, pomiar), soczewki, analizy w tle,
+//! etykiety i znaczniki. Panele boczne – w `panels.rs`.
 
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use crate::analysis;
 use crate::fmt;
 use crate::geo::{bearing, haversine, lat_to_y, lon_to_x, world_m, BBox};
-use crate::graph::{route_from_points, Route, RouteKind, Snap};
 use crate::heights::{Grid, Heights};
 use crate::metrics::{self, TimeModel};
 use crate::osm::{PoiKind, SectorId};
@@ -27,7 +26,6 @@ use crate::world::{Snapshot, World};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Tool {
     Explore,
-    Route,
     Measure,
 }
 
@@ -115,12 +113,6 @@ impl Quality {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RouteMode {
-    Trails,
-    Terrain,
-}
-
 /// Ustawienia zapamiętywane między uruchomieniami.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -133,7 +125,7 @@ pub struct Prefs {
     pub km_grid: bool,
     pub shadows: bool,
     pub snow: bool,
-    /// Ortofotomapa krajowa w stylu satelitarnym (PL, CZ, SK).
+    /// Ortofotomapa GUGiK w stylu satelitarnym.
     pub ortho: bool,
     /// Maska pokrycia terenu z OSM (wody, lasy, skały) w stylu „teren”.
     pub landcover: bool,
@@ -154,7 +146,6 @@ pub struct Prefs {
     pub vs_eye: f32,
     pub camera: (f64, f64, f64, f64, f64, f64),
     pub panel_open: bool,
-    pub profile_open: bool,
 }
 
 impl Default for Prefs {
@@ -187,17 +178,8 @@ impl Default for Prefs {
             vs_eye: 1.7,
             camera: (c.lon, c.lat, c.height, c.heading, c.pitch, c.distance),
             panel_open: false,
-            profile_open: true,
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct Waypoint {
-    pub lon: f64,
-    pub lat: f64,
-    pub e: f32,
-    pub name: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -232,16 +214,7 @@ struct FlyTo {
     dur: f32,
 }
 
-pub struct Flight {
-    pub dist: f32,
-    pub paused: bool,
-    last: Instant,
-    heading: f64,
-}
-
 enum JobResult {
-    Routes(u64, Vec<Route>),
-    RouteFail(u64, String),
     Viewshed(u64, Box<(VsInfo, Vec<u8>, u32, u32, [f64; 4])>),
     LiveVs(u64, Box<(Vec<u8>, u32, u32, [f64; 4])>),
     Shadow(u64, Box<(Vec<u8>, u32, u32, [f64; 4])>),
@@ -269,21 +242,10 @@ pub struct Atlas {
     pub tool: Tool,
     pub lens: Lens,
     pub lens_pin: Option<(f64, f64, f32)>,
-    pub waypoints: Vec<Waypoint>,
-    pub route_mode: RouteMode,
-    pub routes: Vec<Route>,
-    pub route_sel: usize,
-    pub routing: bool,
-    pub route_error: Option<String>,
-    route_gen: u64,
-    route_dirty: bool,
-    route_snap_version: u64,
-    pub gpx: Option<Route>,
     pub measure: Vec<(f64, f64, f32)>,
     pub los: Option<(Option<f64>, f64)>,
     pub selection: Selection,
     pub hover: Option<(f64, f64, f32)>,
-    pub profile_cursor: Option<f32>,
     pub vs: Option<VsInfo>,
     pub vs_busy: bool,
     pub rel: Option<RelInfo>,
@@ -302,10 +264,8 @@ pub struct Atlas {
     tx: std::sync::mpsc::Sender<JobResult>,
     rx: Receiver<JobResult>,
     fly: Option<FlyTo>,
-    pub flight: Option<Flight>,
     pub panorama: Option<Camera>,
     drag_grab: Option<DVec3>,
-    drag_waypoint: Option<usize>,
     pub ctx_menu: Option<(Pos2, f64, f64, f32)>,
     pub search: Option<crate::ui::search::Search>,
     pub help: bool,
@@ -344,21 +304,10 @@ impl Atlas {
             tool: Tool::Explore,
             lens: Lens::None,
             lens_pin: None,
-            waypoints: Vec::new(),
-            route_mode: RouteMode::Trails,
-            routes: Vec::new(),
-            route_sel: 0,
-            routing: false,
-            route_error: None,
-            route_gen: 0,
-            route_dirty: false,
-            route_snap_version: 0,
-            gpx: None,
             measure: Vec::new(),
             los: None,
             selection: Selection::None,
             hover: None,
-            profile_cursor: None,
             vs: None,
             vs_busy: false,
             rel: None,
@@ -377,10 +326,8 @@ impl Atlas {
             tx,
             rx,
             fly: None,
-            flight: None,
             panorama: None,
             drag_grab: None,
-            drag_waypoint: None,
             ctx_menu: None,
             search: None,
             help: false,
@@ -401,11 +348,11 @@ impl Atlas {
         self.prefs.clone()
     }
 
-    /// Link do bieżącego widoku (kamera, styl, punkty trasy): `gran://widok?…`.
+    /// Link do bieżącego widoku (kamera, styl): `psm://widok?…`.
     pub fn share_link(&self) -> String {
         let c = self.panorama.unwrap_or(self.cam);
         let mut s = format!(
-            "gran://widok?lat={:.5}&lon={:.5}&az={:.0}&nach={:.0}&odl={:.0}&styl={}",
+            "psm://widok?lat={:.5}&lon={:.5}&az={:.0}&nach={:.0}&odl={:.0}&styl={}",
             c.lat,
             c.lon,
             c.heading,
@@ -416,26 +363,16 @@ impl Atlas {
         if self.prefs.exag != 1.0 {
             s.push_str(&format!("&prz={:.1}", self.prefs.exag));
         }
-        if !self.waypoints.is_empty() {
-            let pts: Vec<String> = self.waypoints.iter().map(|w| format!("{:.5},{:.5}", w.lat, w.lon)).collect();
-            s.push_str("&trasa=");
-            s.push_str(&pts.join(";"));
-            if self.route_mode == RouteMode::Terrain {
-                s.push_str("&teren=1");
-            }
-        }
         s
     }
 
-    /// Otwarcie linku `gran://widok?…`; `false`, gdy to nie jest link GRANIA.
+    /// Otwarcie linku `psm://widok?…`; `false`, gdy to nie jest link programu.
     pub fn apply_link(&mut self, link: &str) -> bool {
         let link = link.trim();
-        let Some(q) = link.strip_prefix("gran://").and_then(|r| r.split_once('?')).map(|(_, q)| q) else {
+        let Some(q) = link.strip_prefix("psm://").and_then(|r| r.split_once('?')).map(|(_, q)| q) else {
             return false;
         };
         let mut cam = self.cam;
-        let mut wps: Vec<(f64, f64)> = Vec::new();
-        let mut terrain = false;
         let mut ok = false;
         for kv in q.split('&') {
             let Some((k, v)) = kv.split_once('=') else { continue };
@@ -456,16 +393,6 @@ impl Atlas {
                     }
                 }
                 ("prz", Some(x)) => self.prefs.exag = x.clamp(1.0, 3.0),
-                ("teren", _) => terrain = v == "1",
-                ("trasa", _) => {
-                    wps = v
-                        .split(';')
-                        .filter_map(|p| {
-                            let (a, b) = p.split_once(',')?;
-                            Some((b.parse().ok()?, a.parse().ok()?))
-                        })
-                        .collect();
-                }
                 _ => {}
             }
         }
@@ -475,15 +402,6 @@ impl Atlas {
         self.exit_panorama();
         cam.height = self.heights.sample_cached(cam.lon, cam.lat).map(|h| h as f64).unwrap_or(cam.height);
         self.start_fly(cam, 1.4);
-        if !wps.is_empty() {
-            self.clear_route();
-            self.route_mode = if terrain { RouteMode::Terrain } else { RouteMode::Trails };
-            for (lon, lat) in wps {
-                self.add_waypoint(lon, lat, None);
-            }
-            self.tool = Tool::Route;
-            self.prefs.panel_open = true;
-        }
         true
     }
 
@@ -526,7 +444,6 @@ impl Atlas {
     }
 
     pub fn start_fly(&mut self, to: Camera, dur: f32) {
-        self.flight = None;
         self.fly = Some(FlyTo { from: self.cam, to, t0: Instant::now(), dur });
     }
 
@@ -536,28 +453,12 @@ impl Atlas {
         self.fly_to(c[0], c[1], Some((span * 1.25).max(1500.0)));
     }
 
-    pub fn fit_route(&mut self, r: &Route) {
-        let tr = &r.track;
-        if tr.len() == 0 {
-            return;
-        }
-        let mut b = BBox::new(tr.lon[0], tr.lat[0], tr.lon[0], tr.lat[0]);
-        for i in 0..tr.len() {
-            b.w = b.w.min(tr.lon[i]);
-            b.e = b.e.max(tr.lon[i]);
-            b.s = b.s.min(tr.lat[i]);
-            b.n = b.n.max(tr.lat[i]);
-        }
-        self.fit_bbox(&b);
-    }
-
     pub fn enter_panorama(&mut self, lon: f64, lat: f64) {
         if self.panorama.is_none() {
             self.panorama = Some(self.cam);
         }
         let h = self.heights.sample_cached(lon, lat).unwrap_or(0.0) as f64;
         self.fly = None;
-        self.flight = None;
         self.cam.lon = lon;
         self.cam.lat = lat;
         self.cam.height = h + 1.7 / self.prefs.exag.max(1.0);
@@ -594,99 +495,6 @@ impl Atlas {
             }
             ctx.request_repaint();
         }
-        self.animate_flight(ctx);
-    }
-
-    pub fn toggle_flight(&mut self) {
-        if self.flight.is_some() {
-            self.flight = None;
-            return;
-        }
-        if self.current_route().is_none() {
-            self.notify("Przelot: najpierw wyznacz trasę albo wczytaj GPX.");
-            return;
-        }
-        self.fly = None;
-        self.flight = Some(Flight { dist: 0.0, paused: false, last: Instant::now(), heading: self.cam.heading });
-    }
-
-    fn animate_flight(&mut self, ctx: &egui::Context) {
-        let Some(route) = self.current_route().cloned() else {
-            self.flight = None;
-            return;
-        };
-        let Some(fl) = &mut self.flight else { return };
-        let dt = fl.last.elapsed().as_secs_f32().min(0.1);
-        fl.last = Instant::now();
-        let tr = &route.track;
-        let total = *tr.d2.last().unwrap_or(&0.0);
-        if !fl.paused {
-            // tempo: cała trasa w ~40–90 s
-            let speed = (total / 60.0).clamp(30.0, 400.0);
-            fl.dist += speed * dt;
-        }
-        if fl.dist >= total {
-            self.flight = None;
-            return;
-        }
-        let (i, f) = tr.at_dist(fl.dist);
-        let (lon, lat, e) = tr.lerp(i, f);
-        let (ia, fa) = tr.at_dist((fl.dist + 250.0).min(total));
-        let (lon2, lat2, _) = tr.lerp(ia, fa);
-        let want = bearing(lon, lat, lon2, lat2);
-        let dh = ((want - fl.heading + 540.0) % 360.0) - 180.0;
-        fl.heading = (fl.heading + dh * (dt as f64 * 1.5).min(1.0)).rem_euclid(360.0);
-        self.cam.lon = lon;
-        self.cam.lat = lat;
-        self.cam.height = e as f64;
-        self.cam.heading = fl.heading;
-        self.cam.pitch = 24.0;
-        self.cam.distance = 1300.0;
-        self.profile_cursor = Some(fl.dist);
-        ctx.request_repaint();
-    }
-
-    /// Bieżąca trasa (wybrany wariant albo ślad GPX).
-    pub fn current_route(&self) -> Option<&Route> {
-        self.routes.get(self.route_sel).or(self.gpx.as_ref())
-    }
-
-    // ------------------------------------------------------------------ trasa
-
-    pub fn add_waypoint(&mut self, lon: f64, lat: f64, at: Option<usize>) {
-        let e = self.heights.sample_cached(lon, lat).unwrap_or(0.0);
-        let name = self.name_near(lon, lat, 120.0);
-        let w = Waypoint { lon, lat, e, name };
-        match at {
-            Some(i) if i <= self.waypoints.len() => self.waypoints.insert(i, w),
-            _ => self.waypoints.push(w),
-        }
-        self.route_dirty = true;
-    }
-
-    pub fn clear_route(&mut self) {
-        self.waypoints.clear();
-        self.routes.clear();
-        self.route_error = None;
-        self.flight = None;
-        self.route_gen += 1;
-        self.routing = false;
-    }
-
-    pub fn reverse_route(&mut self) {
-        self.waypoints.reverse();
-        self.route_dirty = true;
-    }
-
-    pub fn remove_waypoint(&mut self, i: usize) {
-        if i < self.waypoints.len() {
-            self.waypoints.remove(i);
-            self.route_dirty = true;
-        }
-    }
-
-    pub fn mark_route_dirty(&mut self) {
-        self.route_dirty = true;
     }
 
     /// Nazwa najbliższego punktu (szczyt, schronisko…) w promieniu `r` m.
@@ -699,89 +507,6 @@ impl Atlas {
             .filter(|(d, _)| *d < r)
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, p)| p.poi.name.clone())
-    }
-
-    fn compute_routes(&mut self) {
-        self.route_dirty = false;
-        self.route_gen += 1;
-        let gen = self.route_gen;
-        self.route_error = None;
-        if self.waypoints.len() < 2 {
-            self.routes.clear();
-            self.routing = false;
-            return;
-        }
-        self.routing = true;
-        let tx = self.tx.clone();
-        let wps = self.waypoints.clone();
-        match self.route_mode {
-            RouteMode::Trails => {
-                let snap = self.snap.clone();
-                self.route_snap_version = snap.version;
-                thread::spawn(move || {
-                    let mut snaps: Vec<Snap> = Vec::new();
-                    for w in &wps {
-                        match snap.graph.snap(w.lon, w.lat, 1500.0) {
-                            Some(s) => snaps.push(s),
-                            None => {
-                                let _ = tx.send(JobResult::RouteFail(gen, "Punkt jest daleko od szlaków (ponad 1,5 km) albo szlaki tej okolicy jeszcze się wczytują. Spróbuj trasy przez teren.".into()));
-                                return;
-                            }
-                        }
-                    }
-                    let alts = snap.graph.alternatives(&snaps);
-                    if alts.is_empty() {
-                        let _ = tx.send(JobResult::RouteFail(gen, "Nie znaleziono połączenia szlakami między punktami.".into()));
-                    } else {
-                        let _ = tx.send(JobResult::Routes(gen, alts));
-                    }
-                });
-            }
-            RouteMode::Terrain => {
-                let heights = self.heights.clone();
-                thread::spawn(move || {
-                    let mut pts: Vec<(f64, f64, f32)> = Vec::new();
-                    for w in wps.windows(2) {
-                        let (a, b) = (&w[0], &w[1]);
-                        let d = haversine(a.lon, a.lat, b.lon, b.lat);
-                        let pad = (d * 0.35).max(800.0);
-                        let kx = 111_320.0 * a.lat.to_radians().cos();
-                        let bb = BBox::new(
-                            a.lon.min(b.lon) - pad / kx,
-                            a.lat.min(b.lat) - pad / 110_574.0,
-                            a.lon.max(b.lon) + pad / kx,
-                            a.lat.max(b.lat) + pad / 110_574.0,
-                        );
-                        // poziom siatki: najwyżej ~1400 px na bok
-                        let side_m = haversine(bb.w, bb.s, bb.e, bb.s).max(haversine(bb.w, bb.s, bb.w, bb.n));
-                        let mut z = 14u8;
-                        while z > 9 && side_m / crate::geo::meters_per_pixel(a.lat, z) > 1400.0 {
-                            z -= 1;
-                        }
-                        let g = heights.grid(&bb, z);
-                        let pa = g.to_grid(a.lon, a.lat);
-                        let pb = g.to_grid(b.lon, b.lat);
-                        match analysis::terrain_path(&g, pa, pb, 40.0) {
-                            Some(path) => {
-                                for (k, (gx, gy)) in path.into_iter().enumerate() {
-                                    if k == 0 && !pts.is_empty() {
-                                        continue;
-                                    }
-                                    let (lon, lat) = g.to_lonlat(gx, gy);
-                                    pts.push((lon, lat, g.sample(gx, gy)));
-                                }
-                            }
-                            None => {
-                                let _ = tx.send(JobResult::RouteFail(gen, "Nie da się przejść tędy z limitem nachylenia 40°.".into()));
-                                return;
-                            }
-                        }
-                    }
-                    let r = route_from_points(&pts, RouteKind::Terrain, "Przez teren", 1.35);
-                    let _ = tx.send(JobResult::Routes(gen, vec![r]));
-                });
-            }
-        }
     }
 
     // ------------------------------------------------------------------ analizy w tle
@@ -933,16 +658,6 @@ impl Atlas {
     fn receive_jobs(&mut self) {
         while let Ok(r) = self.rx.try_recv() {
             match r {
-                JobResult::Routes(g, rs) if g == self.route_gen => {
-                    self.routing = false;
-                    self.routes = rs;
-                    self.route_sel = 0;
-                }
-                JobResult::RouteFail(g, e) if g == self.route_gen => {
-                    self.routing = false;
-                    self.routes.clear();
-                    self.route_error = Some(e);
-                }
                 JobResult::Viewshed(g, b) if g == self.gen => {
                     let (info, mask, w, h, rect) = *b;
                     self.vs_busy = false;
@@ -1121,8 +836,6 @@ impl Atlas {
                         self.ctx_menu = None;
                     } else if self.panorama.is_some() {
                         self.exit_panorama();
-                    } else if self.flight.is_some() {
-                        self.flight = None;
                     } else if self.lens_pin.is_some() {
                         self.unpin_lens();
                     } else if self.lens != Lens::None {
@@ -1134,8 +847,7 @@ impl Atlas {
                     }
                 }
                 K::Num1 => self.tool = Tool::Explore,
-                K::Num2 => self.tool = Tool::Route,
-                K::Num3 => self.tool = Tool::Measure,
+                K::Num2 => self.tool = Tool::Measure,
                 K::H | K::I => self.set_lens(Lens::Band),
                 K::W => self.set_lens(Lens::Rel),
                 K::O => self.set_lens(Lens::Vis),
@@ -1150,7 +862,6 @@ impl Atlas {
                 K::T => self.prefs.trails = !self.prefs.trails,
                 K::L => self.prefs.labels = !self.prefs.labels,
                 K::C => self.prefs.contours = !self.prefs.contours,
-                K::F => self.toggle_flight(),
                 K::N => {
                     let mut to = self.cam;
                     to.heading = 0.0;
@@ -1169,17 +880,13 @@ impl Atlas {
                     to.distance = d.distance.min(self.cam.distance.max(8000.0));
                     self.start_fly(to, 0.9);
                 }
-                K::G => self.export_gpx(),
                 K::S => self.screenshot(ctx),
                 K::OpenBracket => self.shift_hour(-0.5),
                 K::CloseBracket => self.shift_hour(0.5),
                 K::Plus | K::Equals => self.prefs.exag = ((self.prefs.exag + 0.1) * 10.0).round() / 10.0,
                 K::Minus => self.prefs.exag = (((self.prefs.exag - 0.1) * 10.0).round() / 10.0).max(1.0),
                 K::Backspace | K::Delete => {
-                    if self.tool == Tool::Route && !self.waypoints.is_empty() {
-                        let n = self.waypoints.len() - 1;
-                        self.remove_waypoint(n);
-                    } else if self.tool == Tool::Measure && !self.measure.is_empty() {
+                    if self.tool == Tool::Measure && !self.measure.is_empty() {
                         self.measure.pop();
                         self.start_los();
                     }
@@ -1219,72 +926,17 @@ impl Atlas {
         self.cam.lon = (self.cam.lon + 540.0).rem_euclid(360.0) - 180.0;
     }
 
-    pub fn export_gpx(&mut self) {
-        let Some(r) = self.current_route() else {
-            self.notify("Brak trasy do zapisania.");
-            return;
-        };
-        let name = match (self.waypoints.first(), self.waypoints.last()) {
-            (Some(a), Some(b)) if self.waypoints.len() >= 2 => format!(
-                "{} – {}",
-                a.name.clone().unwrap_or_else(|| "Start".into()),
-                b.name.clone().unwrap_or_else(|| "Cel".into())
-            ),
-            _ => r.labels.first().cloned().unwrap_or_else(|| "Trasa".into()),
-        };
-        let wps: Vec<crate::gpx::Waypoint> = self
-            .waypoints
-            .iter()
-            .enumerate()
-            .map(|(i, w)| crate::gpx::Waypoint {
-                name: w.name.clone().unwrap_or_else(|| format!("Punkt {}", i + 1)),
-                lon: w.lon,
-                lat: w.lat,
-                e: w.e,
-            })
-            .collect();
-        let text = crate::gpx::export(r, &name, &wps);
-        let file: String = name.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();
-        if let Some(p) = rfd::FileDialog::new()
-            .set_title("Zapisz trasę GPX")
-            .set_file_name(format!("{}.gpx", file.trim()))
-            .add_filter("GPX", &["gpx"])
-            .save_file()
-        {
-            match std::fs::write(&p, text) {
-                Ok(()) => self.notify(format!("Zapisano {}", p.display())),
-                Err(e) => self.notify(format!("Nie udało się zapisać: {e}")),
-            }
-        }
-    }
-
-    pub fn import_gpx(&mut self, path: &std::path::Path) {
-        let text = match std::fs::read_to_string(path) {
-            Ok(t) => t,
-            Err(e) => return self.notify(format!("Nie można odczytać pliku: {e}")),
-        };
-        match crate::gpx::parse(&text) {
-            Ok(t) => {
-                let h = &self.heights;
-                let pts: Vec<(f64, f64, f32)> = t
-                    .points
-                    .iter()
-                    .map(|&(lon, lat, e)| (lon, lat, e.or_else(|| h.sample_cached(lon, lat)).unwrap_or(0.0)))
-                    .collect();
-                let r = route_from_points(&pts, RouteKind::Gpx, &t.name, 1.0);
-                self.fit_route(&r);
-                self.notify(format!("Wczytano ślad „{}” ({}).", t.name, fmt::dist(r.stats.len2)));
-                self.gpx = Some(r);
-                self.prefs.profile_open = true;
-            }
-            Err(e) => self.notify(e),
-        }
+    /// Kamera nie wychodzi poza Polskę (z zapasem 10 km).
+    fn keep_in_poland(&mut self) {
+        let (lon, lat) = crate::national::clamp_to_poland(self.cam.lon, self.cam.lat);
+        self.cam.lon = lon;
+        self.cam.lat = lat;
     }
 
     fn screenshot(&mut self, ctx: &egui::Context) {
         if let Some(p) = rfd::FileDialog::new()
             .set_title("Zapisz zrzut ekranu")
-            .set_file_name("gran.png")
+            .set_file_name("psm.png")
             .add_filter("PNG", &["png"])
             .save_file()
         {
@@ -1329,20 +981,12 @@ impl Atlas {
         let snap = self.world.snapshot();
         if snap.version != self.snap.version {
             self.snap = snap;
-            if self.route_mode == RouteMode::Trails && !self.waypoints.is_empty() && self.route_snap_version != self.snap.version {
-                self.route_dirty = true;
-            }
-        }
-        if self.route_dirty && !self.routing {
-            self.compute_routes();
-        } else if self.route_dirty && self.routing {
-            // nowe punkty w trakcie liczenia – policz od razu na nowo
-            self.compute_routes();
         }
         self.keyboard(&ctx);
         self.animate(&ctx);
+        self.keep_in_poland();
 
-        // dane okolicy: sektory wokół celu kamery i punktów trasy
+        // dane okolicy: sektory OSM wokół celu kamery, tylko w Polsce
         if self.last_want.elapsed() > Duration::from_millis(400) {
             self.last_want = Instant::now();
             let mut want = Vec::new();
@@ -1353,9 +997,7 @@ impl Atlas {
                     want.extend(s.neighbours());
                 }
             }
-            for w in &self.waypoints {
-                want.push(SectorId::at(w.lon, w.lat));
-            }
+            want.retain(|s: &SectorId| crate::national::tile_in_poland(s.tile()));
             self.world.want(want);
         }
 
@@ -1369,7 +1011,7 @@ impl Atlas {
             self.frame_version += 1;
         }
         // wysokość punktu obrotu podąża za terenem
-        if self.panorama.is_none() && self.flight.is_none() {
+        if self.panorama.is_none() {
             if let Some(h) = self.heights.sample_cached(self.cam.lon, self.cam.lat) {
                 let k = if self.fly.is_some() { 0.08 } else { 0.25 };
                 self.cam.height += (h as f64 - self.cam.height) * k;
@@ -1448,7 +1090,7 @@ impl Atlas {
             self.fps.2 = self.fps.1 as f32 / self.fps.0.elapsed().as_secs_f32();
             self.fps = (Instant::now(), 0, self.fps.2);
         }
-        if self.status_line.is_empty() && self.fly.is_none() && self.flight.is_none() {
+        if self.status_line.is_empty() && self.fly.is_none() {
             ctx.request_repaint_after(Duration::from_millis(500));
         } else {
             ctx.request_repaint();
@@ -1483,34 +1125,16 @@ impl Atlas {
                 }
             }
         }
-        // przeciąganie punktu trasy
+        // przeciąganie mapy
         if resp.drag_started_by(egui::PointerButton::Primary) {
-            self.drag_waypoint = None;
             self.drag_grab = None;
             if let Some(p) = pointer {
-                if self.tool == Tool::Route {
-                    for (i, w) in self.waypoints.iter().enumerate() {
-                        if let Some(s) = view.project(self.local(w.lon, w.lat, w.e)) {
-                            if (Pos2::new(s[0] + rect.left(), s[1] + rect.top()) - p).length() < 12.0 {
-                                self.drag_waypoint = Some(i);
-                            }
-                        }
-                    }
-                }
-                if self.drag_waypoint.is_none() {
                     self.drag_grab = self.ground(view, to_px(p)).map(|(lon, lat, e)| self.local(lon, lat, e));
-                }
             }
         }
         if resp.dragged_by(egui::PointerButton::Primary) {
             self.fly = None;
-            if let (Some(i), Some((lon, lat, e))) = (self.drag_waypoint, self.hover) {
-                if let Some(w) = self.waypoints.get_mut(i) {
-                    w.lon = lon;
-                    w.lat = lat;
-                    w.e = e;
-                }
-            } else if self.panorama.is_some() {
+            if self.panorama.is_some() {
                 let d = resp.drag_delta();
                 self.cam.heading = (self.cam.heading - d.x as f64 * 0.15).rem_euclid(360.0);
                 self.cam.pitch = (self.cam.pitch - d.y as f64 * 0.12).clamp(-35.0, 60.0);
@@ -1535,19 +1159,6 @@ impl Atlas {
             }
         }
         if resp.drag_stopped_by(egui::PointerButton::Primary) {
-            if self.drag_waypoint.take().is_some() {
-                if let Some(w) = self.waypoints.last() {
-                    let _ = w;
-                }
-                for w in &mut self.waypoints {
-                    w.name = None;
-                }
-                let names: Vec<Option<String>> = self.waypoints.iter().map(|w| self.name_near(w.lon, w.lat, 120.0)).collect();
-                for (w, n) in self.waypoints.iter_mut().zip(names) {
-                    w.name = n;
-                }
-                self.route_dirty = true;
-            }
             self.drag_grab = None;
         }
         // obrót i nachylenie
@@ -1603,11 +1214,6 @@ impl Atlas {
                         }
                     }
                     self.selection = Selection::Point { lon, lat };
-                    self.prefs.panel_open = true;
-                    self.tab = crate::ui::panels::Tab::Info;
-                }
-                Tool::Route => {
-                    self.add_waypoint(lon, lat, None);
                     self.prefs.panel_open = true;
                     self.tab = crate::ui::panels::Tab::Info;
                 }
@@ -1735,43 +1341,10 @@ impl Atlas {
         }
     }
 
-    /// Linie zmienne: trasy, warianty, ślad GPX, pomiar.
+    /// Linie zmienne: pomiar i linia wzroku.
     fn dyn_lines(&self, view: &View) -> Vec<LineInst> {
         let mut out = Vec::new();
         let _ = view;
-        let push_track = |out: &mut Vec<LineInst>, r: &Route, color: [f32; 4], width: f32, outline: bool| {
-            let tr = &r.track;
-            let n = tr.len();
-            let step = (n / 6000).max(1);
-            let pts: Vec<[f32; 3]> = (0..n)
-                .step_by(step)
-                .chain(std::iter::once(n - 1))
-                .map(|i| {
-                    let (x, z) = self.frame.to_local(tr.lon[i], tr.lat[i]);
-                    [x as f32, tr.e[i] + 2.0, z as f32]
-                })
-                .collect();
-            for w in pts.windows(2) {
-                if outline {
-                    out.push(LineInst { p0: w[0], p1: w[1], color: [0.02, 0.02, 0.02, 1.0], wo: [width + 4.0, 0.0] });
-                }
-            }
-            for w in pts.windows(2) {
-                out.push(LineInst { p0: w[0], p1: w[1], color, wo: [width, 0.0] });
-            }
-        };
-        for (i, r) in self.routes.iter().enumerate() {
-            if i != self.route_sel {
-                push_track(&mut out, r, [0.75, 0.72, 0.66, 1.0], 3.0, false);
-            }
-        }
-        if let Some(r) = &self.gpx {
-            push_track(&mut out, r, lin([186, 104, 236], 1.0), 4.0, true);
-        }
-        if let Some(r) = self.routes.get(self.route_sel) {
-            let c = if r.kind == RouteKind::Terrain { lin([255, 140, 60], 1.0) } else { lin([255, 186, 60], 1.0) };
-            push_track(&mut out, r, c, 5.0, true);
-        }
         // pomiar: linia po terenie
         if self.measure.len() >= 2 {
             for w in self.measure.windows(2) {
@@ -1878,22 +1451,6 @@ impl Atlas {
                 }
             }
         }
-        // punkty trasy
-        let n = self.waypoints.len();
-        for (i, w) in self.waypoints.iter().enumerate() {
-            if let Some(s) = view.project(self.local(w.lon, w.lat, w.e)) {
-                let sp = at(s);
-                let (fill, label) = if i == 0 {
-                    (Color32::from_rgb(90, 200, 110), "A".to_string())
-                } else if i == n - 1 && n > 1 {
-                    (theme::SIGNAL, "B".to_string())
-                } else {
-                    (theme::BRASS, i.to_string())
-                };
-                p.circle(sp, 9.0, fill, Stroke::new(2.0, Color32::from_rgb(20, 20, 20)));
-                p.text(sp, Align2::CENTER_CENTER, label, FontId::proportional(11.0), Color32::from_rgb(20, 16, 8));
-            }
-        }
         for (i, m) in self.measure.iter().enumerate() {
             if let Some(s) = view.project(self.local(m.0, m.1, m.2)) {
                 let sp = at(s);
@@ -1922,14 +1479,6 @@ impl Atlas {
                 }
             }
             _ => {}
-        }
-        // kursor profilu na trasie
-        if let (Some(d), Some(r)) = (self.profile_cursor, self.current_route()) {
-            let (i, f) = r.track.at_dist(d);
-            let (lon, lat, e) = r.track.lerp(i, f);
-            if let Some(s) = view.project(self.local(lon, lat, e)) {
-                p.circle(at(s), 6.0, theme::BRASS, Stroke::new(2.0, Color32::BLACK));
-            }
         }
 
         // kompas
@@ -2053,8 +1602,8 @@ impl Atlas {
         p.rect_filled(bar, 0.0, Color32::from_black_alpha(130));
         p.text(bar.left_center() + Vec2::new(12.0, 0.0), Align2::LEFT_CENTER, info, FontId::monospace(11.5), theme::PAPER_2);
         let attr = match self.prefs.style {
-            Style::Satellite => "Sentinel-2 cloudless 2020 © EOX · ortofoto © GUGiK, © ČÚZK, © ÚGKK SR · teren © Mapterhorn · © OpenStreetMap",
-            _ => "Teren © Mapterhorn (ÚGKK SR, GUGiK, ČÚZK), AWS Open Data · © OpenStreetMap",
+            Style::Satellite => "Sentinel-2 cloudless 2020 © EOX · ortofoto © GUGiK · teren © Mapterhorn · © OpenStreetMap",
+            _ => "Teren © Mapterhorn (GUGiK), AWS Open Data · © OpenStreetMap",
         };
         p.text(bar.right_center() - Vec2::new(12.0, 0.0), Align2::RIGHT_CENTER, attr, FontId::proportional(10.5), theme::PAPER_3);
 
@@ -2077,17 +1626,11 @@ impl Atlas {
         if self.shadow_busy {
             chips.push("liczenie cieni…".into());
         }
-        if self.routing {
-            chips.push("wyznaczanie trasy…".into());
-        }
         if self.vs_busy {
             chips.push("liczenie widoczności…".into());
         }
         if self.panorama.is_some() {
             chips.push("panorama · Esc – powrót".into());
-        }
-        if self.flight.is_some() {
-            chips.push("przelot · F – stop".into());
         }
         let lens_txt = match self.lens {
             Lens::Band => Some("soczewka: ta sama wysokość"),
@@ -2114,22 +1657,6 @@ impl Atlas {
                     ui.set_width(230.0);
                     ui.label(egui::RichText::new(format!("{}  ·  {}", fmt::decimal(lon, lat), fmt::ele(e as f64))).small().monospace().color(theme::PAPER_3));
                     let mut item = |ui: &mut egui::Ui, t: &str| ui.add(egui::Button::new(t).frame(false)).clicked();
-                    if item(ui, "Trasa stąd") {
-                        self.tool = Tool::Route;
-                        if self.waypoints.is_empty() { self.add_waypoint(lon, lat, None) } else { self.add_waypoint(lon, lat, Some(0)) }
-                        close = true;
-                    }
-                    if item(ui, "Trasa tutaj") {
-                        self.tool = Tool::Route;
-                        self.add_waypoint(lon, lat, None);
-                        close = true;
-                    }
-                    if self.waypoints.len() >= 2 && item(ui, "Przez ten punkt") {
-                        let at = self.waypoints.len() - 1;
-                        self.add_waypoint(lon, lat, Some(at));
-                        close = true;
-                    }
-                    ui.separator();
                     if item(ui, "Ta sama wysokość") {
                         self.pin_lens(lon, lat, Lens::Band);
                         close = true;

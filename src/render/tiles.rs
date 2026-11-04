@@ -32,7 +32,7 @@ const ORTHO_MAX_DIST: f64 = 12_000.0;
 pub enum Kind {
     Dem,
     Sat,
-    /// Ortofotomapa krajowa (z13–17, PL / CZ / SK).
+    /// Ortofotomapa GUGiK (z13–17).
     Ortho,
     /// Ortofoto złożone z kafli już zapisanych na dysku (bez sieci) – tylko w kolejce,
     /// wynik trafia pod `Ortho`.
@@ -112,7 +112,7 @@ pub struct TileSettings {
     pub max_dem: usize,
     pub max_img: usize,
     pub imagery: bool,
-    /// Ortofoto krajowe (PL, CZ, SK) na bliskich kaflach.
+    /// Ortofoto GUGiK na bliskich kaflach.
     pub ortho: bool,
     pub max_dist: f64,
 }

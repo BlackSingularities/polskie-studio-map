@@ -1,4 +1,4 @@
-//! Krajowe ortofotomapy (GUGiK – PL, ZBGIS – SK, ČÚZK – CZ). Zasięg krajów z Natural Earth 1:50m.
+//! Zasięg programu (Polska, granica z Natural Earth 1:50m) i ortofotomapa GUGiK.
 
 use std::io::Read;
 use std::sync::{Condvar, Mutex, OnceLock};
@@ -11,8 +11,6 @@ use crate::geo::{x_to_lon, y_to_lat, TileId};
 
 #[derive(Deserialize)]
 struct Country {
-    code: String,
-    ortho: Option<String>,
     ring: Vec<[f64; 2]>,
 }
 
@@ -43,19 +41,14 @@ fn in_ring(lon: f64, lat: f64, ring: &[[f64; 2]]) -> bool {
     inside
 }
 
-/// Czy kafel (z marginesem `pad` ułamka kafla) dotyka kraju spełniającego warunek.
-fn tile_touches(t: TileId, pad: f64, pick: impl Fn(&Country) -> bool) -> bool {
+/// Czy kafel (z marginesem `pad` ułamka kafla) dotyka Polski.
+fn tile_touches(t: TileId, pad: f64) -> bool {
     let n = (1u64 << t.z) as f64;
-    let cs: Vec<&Country> = coverage().iter().filter(|c| pick(c)).collect();
-    if cs.is_empty() {
-        return false;
-    }
     for j in 0..=4 {
         for i in 0..=4 {
             let fx = (t.x as f64 - pad + (1.0 + 2.0 * pad) * i as f64 / 4.0) / n;
             let fy = (t.y as f64 - pad + (1.0 + 2.0 * pad) * j as f64 / 4.0) / n;
-            let (lon, lat) = (x_to_lon(fx), y_to_lat(fy));
-            if cs.iter().any(|c| in_ring(lon, lat, &c.ring)) {
+            if in_poland(x_to_lon(fx), y_to_lat(fy)) {
                 return true;
             }
         }
@@ -63,9 +56,40 @@ fn tile_touches(t: TileId, pad: f64, pick: impl Fn(&Country) -> bool) -> bool {
     false
 }
 
-/// Kod kraju w punkcie (PL, CZ, SK) – tylko kraje z danymi krajowymi.
-pub fn country_at(lon: f64, lat: f64) -> Option<&'static str> {
-    coverage().iter().find(|c| in_ring(lon, lat, &c.ring)).map(|c| c.code.as_str())
+/// Prostokąt obejmujący Polskę: (zachód, południe, wschód, północ).
+const BOUNDS: (f64, f64, f64, f64) = (14.07, 49.0, 24.15, 54.84);
+/// Zapas wokół granicy (~10 km).
+const MARGIN: f64 = 0.15;
+
+/// Czy punkt leży w Polsce.
+pub fn in_poland(lon: f64, lat: f64) -> bool {
+    coverage().iter().any(|c| in_ring(lon, lat, &c.ring))
+}
+
+/// Położenie kamery ograniczone do Polski z zapasem.
+pub fn clamp_to_poland(lon: f64, lat: f64) -> (f64, f64) {
+    (
+        lon.clamp(BOUNDS.0 - MARGIN, BOUNDS.2 + MARGIN),
+        lat.clamp(BOUNDS.1 - MARGIN, BOUNDS.3 + MARGIN),
+    )
+}
+
+/// Czy kafel dotyka Polski (z zapasem). Kafli spoza Polski nie pobieramy.
+pub fn tile_in_poland(t: TileId) -> bool {
+    let b = t.bbox();
+    let (w, s, e, n) = (b.w - MARGIN, b.s - MARGIN, b.e + MARGIN, b.n + MARGIN);
+    if e < BOUNDS.0 || w > BOUNDS.2 || n < BOUNDS.1 || s > BOUNDS.3 {
+        return false;
+    }
+    // punkt granicy w kaflu (kafel większy od kraju) albo próbka kafla w kraju (kafel w środku kraju)
+    let border = coverage()
+        .iter()
+        .flat_map(|c| c.ring.iter())
+        .any(|p| p[0] >= w && p[0] <= e && p[1] >= s && p[1] <= n);
+    border
+        || (0..=4).any(|j| {
+            (0..=4).any(|i| in_poland(w + (e - w) * i as f64 / 4.0, s + (n - s) * j as f64 / 4.0))
+        })
 }
 
 /// Najniższy poziom z ortofoto (niżej wystarcza Sentinel-2).
@@ -74,20 +98,9 @@ pub const ORTHO_MAX_Z: u8 = 17;
 /// Rozmiar obrazu ortofoto na kafel (px).
 pub const ORTHO_PX: u32 = 512;
 
-/// Krajowe ortofoto obejmujące kafel (w kolejności rysowania).
-pub fn ortho_sources(t: TileId) -> Vec<&'static str> {
-    if t.z < ORTHO_MIN_Z {
-        return Vec::new();
-    }
-    ["sk", "cz", "pl"]
-        .into_iter()
-        .filter(|code| tile_touches(t, 0.0, |c| c.ortho.as_deref() == Some(*code)))
-        .collect()
-}
-
-/// Czy kafel (dowolnego poziomu) dotyka kraju z ortofoto.
+/// Czy kafel (dowolnego poziomu) ma ortofoto.
 pub fn has_ortho(t: TileId) -> bool {
-    tile_touches(t, 0.0, |c| c.ortho.is_some())
+    tile_touches(t, 0.0)
 }
 
 const WM: f64 = 20_037_508.342_789_244;
@@ -102,7 +115,7 @@ fn merc_bounds(t: TileId) -> (f64, f64, f64, f64) {
     (x0, y0, x1, y1)
 }
 
-/// Usługi krajowe są wolne: najwyżej tyle zapytań naraz, żeby nie zająć wszystkich wątków kafli.
+/// Usługa krajowa jest wolna: najwyżej tyle zapytań naraz, żeby nie zająć wszystkich wątków kafli.
 const MAX_NATIONAL: usize = 6;
 
 struct Permit;
@@ -156,11 +169,10 @@ fn get_bytes(url: &str, limit: u64) -> Result<Vec<u8>, FetchError> {
     Err(FetchError::Network(last))
 }
 
-/// Ortofoto kafla złożone z usług krajowych (przezroczyste poza krajem) na tle zdjęcia satelitarnego.
-/// Zwraca JPEG albo `Missing`, gdy żadna usługa nie ma obrazu.
+/// Ortofoto kafla (przycięte do Polski) na tle zdjęcia satelitarnego.
+/// Zwraca JPEG albo `Missing`, gdy usługa nie ma obrazu.
 pub fn fetch_ortho(t: TileId, background: Option<image::RgbaImage>) -> Result<Vec<u8>, FetchError> {
-    let sources = ortho_sources(t);
-    if sources.is_empty() {
+    if t.z < ORTHO_MIN_Z || !tile_touches(t, 0.0) {
         return Err(FetchError::Missing);
     }
     let (x0, y0, x1, y1) = merc_bounds(t);
@@ -173,32 +185,19 @@ pub fn fetch_ortho(t: TileId, background: Option<image::RgbaImage>) -> Result<Ve
     let mut any = false;
     let mut net_err = None;
     let nz = (1u64 << t.z) as f64;
-    for src in sources {
-        // usługa ZBGIS poza Słowacją podaje rozmyte tło – każdą usługę przycinamy do jej kraju (siatka co 8 px)
-        let rings: Vec<&[[f64; 2]]> =
-            coverage().iter().filter(|c| c.ortho.as_deref() == Some(src)).map(|c| c.ring.as_slice()).collect();
-        const CELL: u32 = 8;
-        let cells = n / CELL;
-        let mask: Vec<bool> = (0..cells * cells)
-            .map(|i| {
-                let (cx, cy) = ((i % cells) as f64 + 0.5, (i / cells) as f64 + 0.5);
-                let lon = x_to_lon((t.x as f64 + cx / cells as f64) / nz);
-                let lat = y_to_lat((t.y as f64 + cy / cells as f64) / nz);
-                rings.iter().any(|r| in_ring(lon, lat, r))
-            })
-            .collect();
-        let url = match src {
-            "pl" => format!("https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=Raster&STYLES=&CRS=EPSG:3857&BBOX={bb}&WIDTH={n}&HEIGHT={n}&FORMAT=image/png&TRANSPARENT=TRUE"),
-            "sk" => format!("https://zbgis.skgeodesy.sk/zbgis/rest/services/Ortofoto/MapServer/export?bbox={bb}&bboxSR=3857&imageSR=3857&size={n},{n}&format=png32&transparent=true&f=image"),
-            _ => format!("https://ags.cuzk.gov.cz/arcgis1/rest/services/ORTOFOTO_WM/MapServer/export?bbox={bb}&bboxSR=3857&imageSR=3857&size={n},{n}&format=png32&transparent=true&f=image"),
-        };
-        match get_bytes(&url, 16 << 20) {
-            Ok(b) => {
-                let Ok(img) = image::load_from_memory(&b) else { continue };
-                let img = img.to_rgba8();
-                if img.width() != n || img.height() != n {
-                    continue;
-                }
+    // obraz przycinamy do granicy Polski (siatka co 8 px)
+    const CELL: u32 = 8;
+    let cells = n / CELL;
+    let mask: Vec<bool> = (0..cells * cells)
+        .map(|i| {
+            let (cx, cy) = ((i % cells) as f64 + 0.5, (i / cells) as f64 + 0.5);
+            in_poland(x_to_lon((t.x as f64 + cx / cells as f64) / nz), y_to_lat((t.y as f64 + cy / cells as f64) / nz))
+        })
+        .collect();
+    let url = format!("https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=Raster&STYLES=&CRS=EPSG:3857&BBOX={bb}&WIDTH={n}&HEIGHT={n}&FORMAT=image/png&TRANSPARENT=TRUE");
+    match get_bytes(&url, 16 << 20) {
+        Ok(b) => {
+            if let Some(img) = image::load_from_memory(&b).ok().map(|i| i.to_rgba8()).filter(|i| i.width() == n && i.height() == n) {
                 let mut opaque = 0usize;
                 for (i, (dst, s)) in canvas.pixels_mut().zip(img.pixels()).enumerate() {
                     let (px, py) = (i as u32 % n, i as u32 / n);
@@ -209,7 +208,7 @@ pub fn fetch_ortho(t: TileId, background: Option<image::RgbaImage>) -> Result<Ve
                     if a == 0 {
                         continue;
                     }
-                    // usługi czasem zwracają białe tło zamiast przezroczystości poza zasięgiem
+                    // usługa czasem zwraca białe tło zamiast przezroczystości poza zasięgiem
                     if s[0] > 250 && s[1] > 250 && s[2] > 250 {
                         continue;
                     }
@@ -218,13 +217,13 @@ pub fn fetch_ortho(t: TileId, background: Option<image::RgbaImage>) -> Result<Ve
                         dst[c] = ((s[c] as u32 * a + dst[c] as u32 * (255 - a)) / 255) as u8;
                     }
                 }
-                any |= opaque > (n * n / 50) as usize;
+                any = opaque > (n * n / 50) as usize;
             }
-            Err(FetchError::Network(e)) => net_err = Some(e),
-            Err(FetchError::Missing) => {}
         }
+        Err(FetchError::Network(e)) => net_err = Some(e),
+        Err(FetchError::Missing) => {}
     }
-    // niepełnego kafla (któraś usługa nie odpowiedziała) nie zapisujemy – spróbujemy później
+    // kafla bez odpowiedzi usługi nie zapisujemy – spróbujemy później
     if let Some(e) = net_err {
         return Err(FetchError::Network(e));
     }
@@ -244,12 +243,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn coverage_has_poland() {
-        assert_eq!(country_at(19.94, 50.06), Some("PL"));
-        assert_eq!(country_at(14.42, 50.08), Some("CZ"));
-        assert_eq!(country_at(17.11, 48.15), Some("SK"));
-        assert_eq!(country_at(2.35, 48.85), None);
-        let t = crate::geo::tile_at(19.94, 50.06, 14);
-        assert_eq!(ortho_sources(t), vec!["pl"]);
+    fn coverage_is_poland_only() {
+        assert!(in_poland(19.94, 50.06)); // Kraków
+        assert!(!in_poland(14.42, 50.08)); // Praga
+        assert!(!in_poland(17.11, 48.15)); // Bratysława
+        assert!(tile_in_poland(crate::geo::tile_at(19.94, 50.06, 14)));
+        assert!(tile_in_poland(TileId::new(0, 0, 0)));
+        assert!(!tile_in_poland(crate::geo::tile_at(2.35, 48.85, 10))); // Paryż
+        assert!(!tile_in_poland(crate::geo::tile_at(14.42, 50.08, 12)));
+        assert_eq!(clamp_to_poland(2.0, 60.0), (14.07 - MARGIN, 54.84 + MARGIN));
     }
 }

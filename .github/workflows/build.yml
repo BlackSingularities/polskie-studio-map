@@ -1,4 +1,4 @@
-# GRAŃ – kompilacja programu (Rust), instalator Windows (NSIS) i wydanie na GitHub Releases.
+# Polskie Studio Map – kompilacja programu (Rust), instalator Windows (NSIS) i wydanie na GitHub Releases.
 # Program pobiera aktualizacje przez redzikowski.com (kopia wydań z GitHuba), więc wydanie musi zawierać
 # instalator i latest.yml (suma SHA-512, którą program sprawdza przed instalacją).
 #
@@ -82,7 +82,7 @@ jobs:
       - name: Podpis programu
         if: env.CSC_LINK != ''
         shell: pwsh
-        run: '& $env:SIGNTOOL sign /f "$env:RUNNER_TEMP\cert.pfx" /p "$env:CSC_KEY_PASSWORD" /fd sha256 /tr http://timestamp.digicert.com /td sha256 target\release\Gran.exe'
+        run: '& $env:SIGNTOOL sign /f "$env:RUNNER_TEMP\cert.pfx" /p "$env:CSC_KEY_PASSWORD" /fd sha256 /tr http://timestamp.digicert.com /td sha256 target\release\psm.exe'
       - name: NSIS
         shell: pwsh
         run: |
@@ -94,20 +94,20 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force release | Out-Null
-          makensis /V3 "/DVERSION=$env:VERSION" "/DEXE=..\target\release\Gran.exe" "/DOUT=..\release\GRAN-Setup-$env:VERSION.exe" build\gran.nsi
+          makensis /V3 "/DVERSION=$env:VERSION" "/DEXE=..\target\release\psm.exe" "/DOUT=..\release\PSM-Setup-$env:VERSION.exe" build\psm.nsi
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Podpis instalatora
         if: env.CSC_LINK != ''
         shell: pwsh
         run: |
-          & $env:SIGNTOOL sign /f "$env:RUNNER_TEMP\cert.pfx" /p "$env:CSC_KEY_PASSWORD" /fd sha256 /tr http://timestamp.digicert.com /td sha256 "release\GRAN-Setup-$env:VERSION.exe"
-          $sig = Get-AuthenticodeSignature "release\GRAN-Setup-$env:VERSION.exe"
+          & $env:SIGNTOOL sign /f "$env:RUNNER_TEMP\cert.pfx" /p "$env:CSC_KEY_PASSWORD" /fd sha256 /tr http://timestamp.digicert.com /td sha256 "release\PSM-Setup-$env:VERSION.exe"
+          $sig = Get-AuthenticodeSignature "release\PSM-Setup-$env:VERSION.exe"
           Write-Host "$($sig.Status) – $($sig.SignerCertificate.Subject)"
           if ($sig.Status -ne 'Valid') { exit 1 }
       - name: latest.yml (suma SHA-512 dla aktualizatora)
         shell: pwsh
         run: |
-          $name = "GRAN-Setup-$env:VERSION.exe"
+          $name = "PSM-Setup-$env:VERSION.exe"
           $file = "release\$name"
           $bytes = [IO.File]::ReadAllBytes($file)
           $sha = [Convert]::ToBase64String([Security.Cryptography.SHA512]::Create().ComputeHash($bytes))
@@ -127,7 +127,7 @@ jobs:
         with:
           name: windows
           path: |
-            release/GRAN-Setup-*.exe
+            release/PSM-Setup-*.exe
             release/latest.yml
           if-no-files-found: error
           retention-days: 14
@@ -151,13 +151,13 @@ jobs:
           v="${{ needs.version.outputs.version }}"
           f="build/release-notes/$v.md"
           if [ -f "$f" ]; then cp "$f" notes.md
-          else printf 'Instalator Windows `GRAN-Setup-%s.exe` – do pobrania ze strony https://redzikowski.com/portfolio/gran-3d. Zainstalowany program sam proponuje kolejne wersje.\n' "$v" > notes.md
+          else printf 'Instalator Windows `PSM-Setup-%s.exe` – do pobrania ze strony https://redzikowski.com/portfolio/polskie-studio-map. Zainstalowany program sam proponuje kolejne wersje.\n' "$v" > notes.md
           fi
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: GRAŃ ${{ needs.version.outputs.tag }}
+          name: Polskie Studio Map ${{ needs.version.outputs.tag }}
           make_latest: true
           body_path: notes.md
           generate_release_notes: true
