@@ -26,23 +26,26 @@ pub const BASE_MAX_Z: u8 = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Layer {
-    /// Wysokości terenu (Mapterhorn: krajowe modele LiDAR; AWS Open Data jako zapas).
+    /// Wysokości terenu (NMT GUGiK na najbliższych kaflach; Mapterhorn, AWS Open Data jako zapas).
     Dem,
     /// Obraz satelitarny (Sentinel-2 cloudless 2020 © EOX, CC BY-NC-SA 4.0).
     Sat,
     /// Ortofotomapa GUGiK na tle Sentinel-2, JPEG 512 px.
     Ortho,
+    /// Model pokrycia terenu GUGiK (NMPT): drzewa i budynki z lidaru, bliskie kafle.
+    Dsm,
 }
 
 impl Layer {
     /// Warstwy z własnymi paczkami na dysku.
-    pub const STORED: [Layer; 3] = [Layer::Dem, Layer::Sat, Layer::Ortho];
+    pub const STORED: [Layer; 4] = [Layer::Dem, Layer::Sat, Layer::Ortho, Layer::Dsm];
 
     pub fn id(self) -> u8 {
         match self {
             Layer::Dem => 0,
             Layer::Sat => 1,
             Layer::Ortho => 2,
+            Layer::Dsm => 3,
         }
     }
 
@@ -52,6 +55,7 @@ impl Layer {
             Layer::Sat => "sat",
             // „ortho2”: kafle przycięte do granicy kraju
             Layer::Ortho => "ortho2",
+            Layer::Dsm => "dsm",
         }
     }
 
@@ -66,7 +70,7 @@ impl Layer {
                 t.z, t.y, t.x
             ),
             // składane z kilku usług (`national`)
-            Layer::Ortho => String::new(),
+            Layer::Ortho | Layer::Dsm => String::new(),
         }
     }
 

@@ -1218,6 +1218,16 @@ fn layers_tab(a: &mut Atlas, ui: &mut egui::Ui) {
     theme::switch(ui, &mut a.prefs.snow, "Śnieg");
     theme::switch(ui, &mut a.prefs.ortho, "Ortofoto GUGiK");
     theme::switch(ui, &mut a.prefs.landcover, "Pokrycie terenu z OSM");
+    let before = a.prefs.surface;
+    theme::switch(ui, &mut a.prefs.surface, "Drzewa i budynki z lidaru (NMPT, z bliska)");
+    if before != a.prefs.surface {
+        crate::download::set_surface(a.prefs.surface);
+        // ten sam kafel ma teraz inne wysokości
+        a.heights.set_store(a.heights.store());
+        if let Some(r) = &mut a.renderer {
+            r.tiles.reset();
+        }
+    }
     ui.add_space(10.0);
     ui.add(egui::Slider::new(&mut a.prefs.label_density, 0.3..=2.0).text("gęstość nazw"));
 }

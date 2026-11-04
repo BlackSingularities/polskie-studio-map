@@ -28,7 +28,7 @@ impl std::fmt::Display for BakeError {
 /// Plik ze źródła (PNG Terrarium / JPEG) → zapis na dysk.
 pub fn bake(layer: Layer, source: &[u8]) -> Result<Vec<u8>, BakeError> {
     match layer {
-        Layer::Dem => {
+        Layer::Dem | Layer::Dsm => {
             let (elev, w, h) = terrarium(source)?;
             Ok(encode_dem(&elev, w, h))
         }

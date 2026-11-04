@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Read;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
@@ -16,8 +17,33 @@ const USER_AGENT: &str = concat!(
     " (+https://redzikowski.com/portfolio/polskie-studio-map)"
 );
 
-/// Najwyższy poziom kafla terenu 256 px: ćwiartka kafla 512 px poziomu 15 źródła.
-pub const TERRAIN_MAX_Z: u8 = 16;
+/// Najwyższy poziom kafla terenu 256 px (około 0,8 m na piksel w Polsce): NMT GUGiK z WCS.
+pub const TERRAIN_MAX_Z: u8 = 17;
+/// Najwyższy poziom z Mapterhorn: ćwiartka kafla 512 px poziomu 15 źródła.
+const MAPTERHORN_MAX_Z: u8 = 16;
+/// Od tego poziomu w trybie „model pokrycia” teren pochodzi z NMPT (każdy kafel to kilka sekund pracy usługi).
+const SURFACE_MIN_Z: u8 = 16;
+
+static SURFACE: AtomicBool = AtomicBool::new(false);
+
+/// Tryb „drzewa i budynki z lidaru”.
+pub fn set_surface(on: bool) {
+    SURFACE.store(on, Ordering::Relaxed);
+}
+
+/// Warstwa na dysku, z której pochodzi kafel terenu.
+pub fn dem_layer(t: TileId) -> Layer {
+    if SURFACE.load(Ordering::Relaxed) && t.z >= SURFACE_MIN_Z {
+        Layer::Dsm
+    } else {
+        Layer::Dem
+    }
+}
+
+/// Kafel terenu idzie przez wolną usługę WCS.
+pub fn dem_from_wcs(t: TileId) -> bool {
+    t.z == TERRAIN_MAX_Z || dem_layer(t) == Layer::Dsm
+}
 
 /// Kafel pobierany właśnie przez ten wątek. Inny wątek chcący ten sam kafel czeka i bierze go z dysku.
 struct Claim(Layer, TileId);
@@ -202,9 +228,57 @@ fn fetch_mapterhorn(store: &Store, t: TileId) -> Result<Vec<u8>, FetchError> {
     Ok(own)
 }
 
-/// Teren: najpierw Mapterhorn (krajowe modele LiDAR), a gdy niedostępny – AWS (do poziomu 15).
+/// Siatka ASCII z WCS (odpowiedź wieloczęściowa): wysokości od górnego wiersza, braki poniżej progu dziur.
+fn parse_aaigrid(body: &str, n: usize) -> Result<Vec<f32>, String> {
+    let at = body.find("ncols").ok_or("usługa nie zwróciła siatki")?;
+    let mut tokens = body[at..].split_ascii_whitespace();
+    let mut nodata = None;
+    let mut first = None;
+    while let Some(k) = tokens.next() {
+        if k.parse::<f32>().is_ok() {
+            first = Some(k);
+            break;
+        }
+        let v = tokens.next().ok_or("urwany nagłówek siatki")?;
+        if k.eq_ignore_ascii_case("nodata_value") {
+            nodata = v.parse::<f32>().ok();
+        }
+    }
+    let values: Vec<f32> = first
+        .into_iter()
+        .chain(tokens)
+        .take(n * n)
+        .map(|t| t.parse::<f32>().map_err(|_| "błędna wartość siatki".to_string()))
+        .collect::<Result<_, _>>()?;
+    if values.len() != n * n {
+        return Err("niepełna siatka".into());
+    }
+    Ok(values.into_iter().map(|v| if Some(v) == nodata || v < -500.0 || !v.is_finite() { -32768.0 } else { v }).collect())
+}
+
+/// Kafel z usługi WCS GUGiK (NMT albo NMPT, rozdzielczość 1 m).
+fn fetch_wcs(store: &Store, t: TileId, surface: bool) -> Result<Vec<u8>, FetchError> {
+    const CRS: &str = "http://www.opengis.net/def/crs/EPSG/0/3857";
+    let (service, coverage) = if surface {
+        ("NMPT/GRID1/WCS/DigitalSurfaceModel", "DSM_PL-EVRF2007-NH")
+    } else {
+        ("NMT/GRID1/WCS/DigitalTerrainModel", "DTM_PL-EVRF2007-NH")
+    };
+    let (x0, y0, x1, y1) = crate::national::merc_bounds(t);
+    let url = format!(
+        "https://mapy.geoportal.gov.pl/wss/service/PZGIK/{service}?SERVICE=WCS&REQUEST=GetCoverage&VERSION=2.0.1&COVERAGEID={coverage}&FORMAT=image/x-aaigrid&SUBSETTINGCRS={CRS}&OUTPUTCRS={CRS}&SUBSET=x({x0:.2},{x1:.2})&SUBSET=y({y0:.2},{y1:.2})&SCALESIZE=x(256),y(256)"
+    );
+    let b = crate::national::get_bytes(&url, 8 << 20)?;
+    let elev = parse_aaigrid(&String::from_utf8_lossy(&b), 256).map_err(FetchError::Network)?;
+    bake_terrain(store, t, elev, 256, 256)
+}
+
+/// Teren: na najbliższych kaflach NMT GUGiK, dalej Mapterhorn, a gdy niedostępny – AWS (do poziomu 15).
 fn fetch_terrain(store: &Store, t: TileId) -> Result<Vec<u8>, FetchError> {
-    if (1..=TERRAIN_MAX_Z).contains(&t.z) {
+    if t.z > MAPTERHORN_MAX_Z {
+        return fetch_wcs(store, t, false);
+    }
+    if (1..=MAPTERHORN_MAX_Z).contains(&t.z) {
         match fetch_mapterhorn(store, t) {
             Ok(b) => return Ok(b),
             Err(FetchError::Missing) => {}
@@ -224,6 +298,7 @@ pub fn get(store: &Store, layer: Layer, t: TileId) -> Result<Vec<u8>, FetchError
     if !crate::national::tile_in_poland(t) {
         return Err(FetchError::Missing);
     }
+    let layer = if layer == Layer::Dem { dem_layer(t) } else { layer };
     if let Some(r) = stored(store, layer, t) {
         return r;
     }
@@ -231,7 +306,9 @@ pub fn get(store: &Store, layer: Layer, t: TileId) -> Result<Vec<u8>, FetchError
     if let Some(r) = stored(store, layer, t) {
         return r;
     }
-    let fetched = if layer == Layer::Dem {
+    let fetched = if layer == Layer::Dsm {
+        fetch_wcs(store, t, true)
+    } else if layer == Layer::Dem {
         fetch_terrain(store, t)
     } else {
         fetch_any(store, layer, t).and_then(|src| bake::bake(layer, &src).map_err(|e| FetchError::Network(e.to_string())))
@@ -246,5 +323,19 @@ pub fn get(store: &Store, layer: Layer, t: TileId) -> Result<Vec<u8>, FetchError
             Err(FetchError::Missing)
         }
         Err(e) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_multipart_grid() {
+        let body = "--wcs\nContent-Type: image/x-aaigrid\nContent-Disposition: INLINE; filename=result.asc\n\nncols 2\nnrows 2\nxllcorner 1\nyllcorner 1\ncellsize 1\nNODATA_value -9999\n 200.5 201\n -9999 203\n--wcs--\n";
+        let v = parse_aaigrid(body, 2).unwrap();
+        assert_eq!(v, vec![200.5, 201.0, -32768.0, 203.0]);
+        assert!(parse_aaigrid("<xml>błąd</xml>", 2).is_err());
+        assert!(parse_aaigrid("ncols 2\nnrows 2\n 1 2", 2).is_err());
     }
 }

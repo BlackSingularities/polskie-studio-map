@@ -548,7 +548,7 @@ impl Tiles {
     /// Najbliższy rezydentny przodek (albo sam kafel) i przekształcenie współrzędnych.
     fn find(&self, t: &TileId, kind: Kind) -> Option<(TileId, [f32; 3])> {
         let start = match kind {
-            Kind::Dem => t.z.min(16),
+            Kind::Dem => t.z.min(download::TERRAIN_MAX_Z),
             Kind::Sat => t.z.min(SAT_MAX_Z),
             Kind::Ortho | Kind::OrthoLocal => t.z.min(national::ORTHO_MAX_Z),
             Kind::Overlay(_) => t.z.min(layers::MAX_Z),
@@ -598,9 +598,13 @@ fn ancestor_at(t: TileId, z: u8) -> TileId {
     }
 }
 
-/// Wolne usługi: ortofoto i warstwy WMS.
-fn is_slow(k: Kind) -> bool {
-    matches!(k, Kind::Ortho | Kind::Overlay(_))
+/// Wolne usługi: ortofoto, warstwy WMS i teren z WCS GUGiK.
+fn is_slow(k: Key) -> bool {
+    match k.0 {
+        Kind::Ortho | Kind::Overlay(_) => true,
+        Kind::Dem => download::dem_from_wcs(k.1),
+        _ => false,
+    }
 }
 
 fn worker(q: Arc<(Mutex<Queue>, Condvar)>, tx: Sender<Loaded>, heights: Heights, ctx: eframe::egui::Context) {
@@ -615,13 +619,13 @@ fn worker(q: Arc<(Mutex<Queue>, Condvar)>, tx: Sender<Loaded>, heights: Heights,
                     .list
                     .iter()
                     .enumerate()
-                    .filter(|(_, r)| slow_free || !is_slow(r.key.0))
+                    .filter(|(_, r)| slow_free || !is_slow(r.key))
                     .min_by(|a, b| a.1.prio.total_cmp(&b.1.prio))
                     .map(|(i, _)| i);
                 if let Some(i) = best {
                     let r = g.list.swap_remove(i);
                     if g.inflight.insert(r.key) {
-                        if is_slow(r.key.0) {
+                        if is_slow(r.key) {
                             g.slow += 1;
                         }
                         break r;
@@ -647,7 +651,7 @@ fn worker(q: Arc<(Mutex<Queue>, Condvar)>, tx: Sender<Loaded>, heights: Heights,
                 None => Payload::Missing,
             },
         };
-        if is_slow(req.key.0) {
+        if is_slow(req.key) {
             let (m, cv) = &*q;
             m.lock().unwrap().slow -= 1;
             cv.notify_all();

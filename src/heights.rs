@@ -86,7 +86,7 @@ impl Heights {
             return None;
         }
         let store = self.store();
-        match store.read(Layer::Dem, t).and_then(|b| decode_dem(&b)) {
+        match store.read(download::dem_layer(t), t).and_then(|b| decode_dem(&b)) {
             Some(d) => {
                 let d = Arc::new(d);
                 self.insert(t, d.clone());
