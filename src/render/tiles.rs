@@ -579,7 +579,8 @@ impl Tiles {
             let mut ages: Vec<u64> = self.img.values().map(|d| d.used).collect();
             ages.sort_unstable();
             let cut = ages[self.img.len() - s.max_img * 4 / 5];
-            self.img.retain(|k, d| d.used >= cut || k.1.z <= 6);
+            // kafle zmienne (pogoda, kartogram) nie mają przywileju tła: inaczej każda godzina zostawałaby w pamięci
+            self.img.retain(|k, d| d.used >= cut || (k.1.z <= 6 && !matches!(k.0, Kind::Overlay(i) if i >= crate::weather::FIELD_BASE)));
         }
     }
 

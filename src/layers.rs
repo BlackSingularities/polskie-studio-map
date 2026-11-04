@@ -208,6 +208,9 @@ pub fn load(root: &Path, i: u16, t: TileId) -> Option<image::RgbaImage> {
     if i >= crate::stats::OVERLAY_BASE {
         return crate::stats::render_tile(i, t);
     }
+    if i >= crate::weather::FIELD_BASE {
+        return crate::weather::render_tile(i, t);
+    }
     if !national::tile_in_poland(t) {
         return None;
     }
