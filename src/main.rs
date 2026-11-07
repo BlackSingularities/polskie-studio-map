@@ -8,6 +8,7 @@ mod analysis;
 mod app;
 mod bake;
 mod download;
+mod feedback;
 mod feeds;
 mod fmt;
 mod geo;
@@ -33,6 +34,7 @@ mod weather;
 mod world;
 
 fn main() -> eframe::Result<()> {
+    feedback::install("polskie-studio-map", "Polskie Studio Map", env!("CARGO_PKG_VERSION"), "PolskieStudioMap");
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or("info,wgpu_hal=warn,wgpu_core=warn,naga=warn"),
     )

@@ -73,6 +73,7 @@ pub struct App {
     world: World,
     atlas: Atlas,
     update: Update,
+    feedback: crate::feedback::FeedbackUi,
 }
 
 /// Klucz ustawień widoku; nowy układ zaczyna od nowych domyślnych.
@@ -93,6 +94,7 @@ impl App {
             world,
             atlas,
             update: Update::Idle,
+            feedback: Default::default(),
             settings,
             store,
             usage: Arc::new(Usage {
@@ -251,6 +253,7 @@ impl App {
         let mut close = false;
         let mut save = false;
         let mut check = false;
+        let mut report = false;
         let used = self.usage.bytes.load(Ordering::Relaxed);
         let known = self.usage.known.load(Ordering::Relaxed);
         let current_limit = self.settings.limit_gb;
@@ -321,6 +324,9 @@ impl App {
                             if ui.button(theme::ic(theme::icon::ARROWS_CLOCKWISE, "Sprawdź aktualizacje")).clicked() {
                                 check = true;
                             }
+                            if ui.button(theme::ic(theme::icon::BUG, "Zgłoś błąd lub sugestię…")).clicked() {
+                                report = true;
+                            }
                             ui.add_space(12.0);
                             ui.label(theme::kicker("Autor"));
                             if ui.link("redzikowski.com").clicked() {
@@ -353,6 +359,9 @@ impl App {
         }
         if check {
             self.check_updates(true);
+        }
+        if report {
+            self.feedback.open();
         }
     }
 
@@ -564,6 +573,7 @@ impl eframe::App for App {
         crate::ui::panels::help(&mut self.atlas, ctx);
         self.settings_window(ctx);
         self.moving_overlay(ctx);
+        self.feedback.show(ctx);
     }
 }
 
