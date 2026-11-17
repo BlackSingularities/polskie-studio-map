@@ -1,0 +1,30 @@
+{
+  "slug": "polskie-studio-map",
+  "name": "Polskie Studio Map",
+  "label": "atlas warstw mapowych Polski 3D",
+  "icon": "icon.png",
+  "url": "https://redzikowski.com/portfolio/polskie-studio-map",
+  "posters": [
+    {
+      "platform": "windows",
+      "file": "windows.png",
+      "title": "Cała Polska *w trzech wymiarach*",
+      "lead": "Rzeczywisty model terenu, ortofotomapa GUGiK i dane OpenStreetMap złożone w multimapę z dziesiątkami warstw.",
+      "shots": [
+        {
+          "src": "../screenshots/windows/01-polskie-studio-map-cover.png",
+          "caption": "Teren 3D z ortofotomapą GUGiK"
+        }
+      ],
+      "features": [
+        "teren 3D całej Polski",
+        "ortofoto GUGiK",
+        "szlaki z OpenStreetMap",
+        "Słońce i cienie",
+        "linia wzroku i panorama",
+        "aktualizacje z redzikowski.com"
+      ],
+      "meta": "Windows 10 i 11"
+    }
+  ]
+}
