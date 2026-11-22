@@ -209,3 +209,69 @@ pub fn switch(ui: &mut egui::Ui, value: &mut bool, text: &str) -> egui::Response
     p.circle_filled(egui::pos2(x, track.center().y), 7.0, if *value { ON_ACCENT } else { PAPER_2 });
     resp
 }
+
+/// Wysokość górnego paska.
+pub const TOP_BAR_H: f32 = 58.0;
+
+/// Kafelek narzędzia na górnym pasku: ikona i krótki podpis pod nią.
+pub fn tool_tile(ui: &mut egui::Ui, glyph: &str, label: &str, on: bool, w: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 46.0), Sense::click());
+    let p = ui.painter();
+    if on {
+        p.rect_filled(rect, 10.0, BRASS_DIM);
+    } else if resp.is_pointer_button_down_on() {
+        p.rect_filled(rect, 10.0, Color32::from_white_alpha(22));
+    } else if resp.hovered() {
+        p.rect_filled(rect, 10.0, Color32::from_white_alpha(12));
+    }
+    let color = if on { BRASS } else { PAPER };
+    p.text(rect.center() - egui::vec2(0.0, 7.0), egui::Align2::CENTER_CENTER, glyph, FontId::proportional(20.0), color);
+    let g = p.layout_no_wrap(label.to_string(), FontId::proportional(10.0), if on { BRASS } else { PAPER_2 });
+    let x = rect.center().x - (g.size().x / 2.0).min(w / 2.0 - 1.0);
+    p.with_clip_rect(rect).galley(egui::pos2(x, rect.bottom() - 15.0), g, PAPER_2);
+    resp
+}
+
+/// Przycisk paska z ikoną, tytułem i podtytułem (np. styl mapy i jego nazwa).
+pub fn bar_button(ui: &mut egui::Ui, glyph: &str, glyph_color: Color32, title: &str, sub: &str, w: f32, open: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 42.0), Sense::click());
+    let p = ui.painter();
+    let bg = if open {
+        Color32::from_rgba_unmultiplied(122, 176, 255, 40)
+    } else if resp.hovered() {
+        Color32::from_white_alpha(16)
+    } else {
+        Color32::TRANSPARENT
+    };
+    p.rect_filled(rect, 12.0, bg);
+    p.text(rect.left_center() + egui::vec2(18.0, 0.0), egui::Align2::CENTER_CENTER, glyph, FontId::proportional(20.0), glyph_color);
+    let clip = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - 22.0, rect.bottom()));
+    let tp = p.with_clip_rect(clip);
+    tp.text(rect.left_top() + egui::vec2(38.0, 5.0), egui::Align2::LEFT_TOP, title, FontId::proportional(14.0), PAPER);
+    tp.text(rect.left_bottom() + egui::vec2(38.0, -5.0), egui::Align2::LEFT_BOTTOM, sub, FontId::proportional(10.5), PAPER_3);
+    p.text(rect.right_center() - egui::vec2(10.0, 0.0), egui::Align2::RIGHT_CENTER, icon::CARET_DOWN, FontId::proportional(12.0), PAPER_3);
+    resp
+}
+
+/// Cienka pionowa kreska między grupami na pasku.
+pub fn bar_divider(ui: &mut egui::Ui) {
+    let (r, _) = ui.allocate_exact_size(egui::vec2(9.0, 30.0), Sense::hover());
+    ui.painter().line_segment([egui::pos2(r.center().x, r.top()), egui::pos2(r.center().x, r.bottom())], Stroke::new(1.0_f32, Color32::from_white_alpha(26)));
+}
+
+/// Zakładka w rzędzie zakładek panelu bocznego: ikona i podpis, aktywna na niebieskim tle.
+pub fn tab_button(ui: &mut egui::Ui, glyph: &str, label: &str, on: bool, w: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 34.0), Sense::click());
+    let p = ui.painter();
+    if on {
+        p.rect_filled(rect, 9.0, Color32::from_rgba_unmultiplied(122, 176, 255, 34));
+    } else if resp.hovered() {
+        p.rect_filled(rect, 9.0, Color32::from_white_alpha(12));
+    }
+    let color = if on { BRASS } else { PAPER_2 };
+    let text = format!("{glyph}  {label}");
+    let g = p.layout_no_wrap(text, FontId::proportional(13.0), color);
+    let x = rect.center().x - (g.size().x / 2.0).min(w / 2.0 - 2.0);
+    p.with_clip_rect(rect).galley(egui::pos2(x, rect.center().y - g.size().y / 2.0), g, color);
+    resp
+}
