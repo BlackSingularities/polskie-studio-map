@@ -1,4 +1,5 @@
-//! Interfejs nad mapą: wyszukiwarka, pasek narzędzi, szuflada (szczegóły, warstwy, światło), sterowanie kamerą, profil i pomoc.
+//! Interfejs nad mapą (układ jak w GRANI): górny pasek (panele, narzędzia, wyszukiwarka, pora dnia, styl,
+//! widok), prawy panel z zakładkami (szczegóły, warstwy, statystyka, pogoda), sterowanie kamerą i pomoc.
 
 use eframe::egui::{self, Color32, RichText};
 
@@ -10,9 +11,49 @@ use crate::sun::{self, Day};
 use crate::ui::atlas::{Atlas, Lens, Quality, Selection, Style, Tool};
 use crate::ui::theme;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tab {
     Info,
+    Layers,
+    Stats,
+    Weather,
+}
+
+impl Tab {
+    pub const ALL: [Tab; 4] = [Tab::Info, Tab::Layers, Tab::Stats, Tab::Weather];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Tab::Info => "Szczegóły",
+            Tab::Layers => "Warstwy",
+            Tab::Stats => "Statystyka",
+            Tab::Weather => "Pogoda",
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            Tab::Info => theme::icon::COMPASS,
+            Tab::Layers => theme::icon::STACK,
+            Tab::Stats => theme::icon::CHART_BAR,
+            Tab::Weather => theme::icon::CLOUD_SUN,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Tab::Info => "P",
+            Tab::Layers => "G",
+            Tab::Stats => "B",
+            Tab::Weather => "K",
+        }
+    }
+}
+
+/// Otwiera panel boczny na zakładce albo go chowa, gdy ta zakładka już jest widoczna.
+pub fn toggle_tab(a: &mut Atlas, tab: Tab) {
+    a.prefs.panel_open = !(a.prefs.panel_open && a.tab == tab);
+    a.tab = tab;
 }
 
 fn metric(ui: &mut egui::Ui, k: &str, v: String) {
@@ -40,84 +81,195 @@ fn big(ui: &mut egui::Ui, v: String, sub: &str, color: Color32) {
     });
 }
 
-/// Wyszukiwarka w lewym górnym rogu; po kliknięciu rozwija się w tym samym miejscu.
-pub fn search_pill(a: &mut Atlas, ctx: &egui::Context) {
-    if a.search.is_some() {
-        return;
-    }
-    egui::Area::new(egui::Id::new("szukaj-pole"))
-        .fixed_pos([16.0, 16.0])
+/// Górny pasek na całą szerokość okna: od lewej panele i narzędzia, wyszukiwarka na środku,
+/// po prawej pora dnia, styl mapy, widok i przyciski programu (`trailing`).
+pub fn top_bar(a: &mut Atlas, ctx: &egui::Context, trailing: impl FnOnce(&mut Atlas, &mut egui::Ui)) {
+    // zegar przy porze „teraz” ma iść także przy nieruchomym widoku
+    ctx.request_repaint_after(std::time::Duration::from_secs(20));
+    egui::TopBottomPanel::top("gorny-pasek")
+        .exact_height(theme::TOP_BAR_H)
+        .show_separator_line(false)
+        .frame(egui::Frame::new().fill(theme::INK_1).inner_margin(egui::Margin::symmetric(10, 6)))
         .show(ctx, |ui| {
-            theme::glass().show(ui, |ui| {
-                ui.set_width(RAIL_X + DRAWER_W - 28.0);
-                if theme::row_button(ui, theme::icon::MAGNIFYING_GLASS, "Szukaj miejsca, szczytu, szlaku", false).on_hover_text("/").clicked() {
-                    a.search = Some(Default::default());
-                }
-            });
-        });
-}
-
-const RAIL_X: f32 = 16.0;
-const TOP_Y: f32 = 76.0;
-const DRAWER_W: f32 = 372.0;
-
-/// Pionowy pasek narzędzi po lewej.
-pub fn rail(a: &mut Atlas, ctx: &egui::Context) {
-    egui::Area::new(egui::Id::new("narzedzia"))
-        .fixed_pos([RAIL_X, TOP_Y])
-        .show(ctx, |ui| {
-            theme::glass().show(ui, |ui| {
-                ui.vertical(|ui| {
-                    let open_tab = |a: &mut Atlas, tab: Tab| {
-                        a.prefs.panel_open = !(a.prefs.panel_open && a.tab == tab);
-                        a.tab = tab;
-                    };
-                    if theme::icon_button(ui, theme::icon::COMPASS, a.tool == Tool::Explore && a.prefs.panel_open && a.tab == Tab::Info).on_hover_text("Szczegóły okolicy (1)").clicked() {
-                        a.tool = Tool::Explore;
-                        open_tab(a, Tab::Info);
-                    }
-                    ui.separator();
-                    if theme::icon_button(ui, theme::icon::STACK, a.layers_open).on_hover_text("Warstwy").clicked() {
-                        a.layers_open = !a.layers_open;
-                    }
-                    if theme::icon_button(ui, theme::icon::CHART_BAR, a.stats_open).on_hover_text("Statystyka GUS").clicked() {
-                        a.stats_open = !a.stats_open;
-                    }
-                    if theme::icon_button(ui, theme::icon::CLOUD_SUN, a.weather_open).on_hover_text("Pogoda").clicked() {
-                        a.weather_open = !a.weather_open;
-                    }
-                    if theme::icon_button(ui, theme::icon::RULER, a.tool == Tool::Measure).on_hover_text("Pomiar i linia wzroku (2)").clicked() {
-                        a.tool = if a.tool == Tool::Measure { Tool::Explore } else { Tool::Measure };
-                        a.prefs.panel_open = true;
-                        a.tab = Tab::Info;
-                    }
-                    ui.separator();
-                    if theme::icon_button(ui, theme::icon::WAVES, a.lens == Lens::Band).on_hover_text("Ta sama wysokość (H)").clicked() {
-                        a.set_lens(Lens::Band);
-                    }
-                    if theme::icon_button(ui, theme::icon::PLUS_MINUS, a.lens == Lens::Rel).on_hover_text("Wysokość względna (W)").clicked() {
-                        a.set_lens(Lens::Rel);
-                    }
-                    if theme::icon_button(ui, theme::icon::EYE, a.lens == Lens::Vis).on_hover_text("Co widać stąd (O)").clicked() {
-                        a.set_lens(Lens::Vis);
-                    }
-                    ui.separator();
-                    if theme::icon_button(ui, theme::icon::MOUNTAINS, a.panorama.is_some()).on_hover_text("Panorama ze środka widoku").clicked() {
-                        if a.panorama.is_some() {
-                            a.exit_panorama();
-                        } else {
-                            let (lon, lat) = (a.cam.lon, a.cam.lat);
-                            a.enter_panorama(lon, lat);
-                        }
+            let full = ui.max_rect().expand2(egui::vec2(10.0, 6.0));
+            ui.painter().line_segment([full.left_bottom(), full.right_bottom()], egui::Stroke::new(1.0, theme::INK_3));
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 3.0;
+                tools(a, ui);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    trailing(a, ui);
+                    theme::bar_divider(ui);
+                    view_button(a, ui);
+                    style_button(a, ui);
+                    sun_button(a, ui);
+                    // wyszukiwarka na środku pozostałego miejsca
+                    let free = ui.available_width();
+                    let w = (free - 24.0).min(440.0);
+                    if w >= 160.0 {
+                        ui.add_space(((free - w) / 2.0).max(0.0));
+                        search_field(a, ui, w);
+                    } else if theme::tool_tile(ui, theme::icon::MAGNIFYING_GLASS, "Szukaj", a.search.is_some(), 52.0).on_hover_text("Szukaj miejsca (/)").clicked() {
+                        a.search = Some(Default::default());
                     }
                 });
             });
         });
 }
 
+/// Pole wyszukiwarki na pasku; kliknięcie otwiera wyszukiwarkę w tym samym miejscu.
+fn search_field(a: &mut Atlas, ui: &mut egui::Ui, w: f32) {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 40.0), egui::Sense::click());
+    let p = ui.painter();
+    p.rect_filled(rect, 12.0, if resp.hovered() { Color32::from_white_alpha(18) } else { Color32::from_white_alpha(8) });
+    p.text(rect.left_center() + egui::vec2(16.0, 0.0), egui::Align2::LEFT_CENTER, theme::icon::MAGNIFYING_GLASS, egui::FontId::proportional(18.0), theme::PAPER_2);
+    p.with_clip_rect(rect.shrink(4.0)).text(rect.left_center() + egui::vec2(44.0, 0.0), egui::Align2::LEFT_CENTER, "Miejscowość, adres, działka, szczyt…", egui::FontId::proportional(14.0), theme::PAPER_3);
+    p.text(rect.right_center() - egui::vec2(14.0, 0.0), egui::Align2::RIGHT_CENTER, "/", egui::FontId::monospace(12.0), theme::PAPER_3);
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("szukaj-pole-rect"), rect));
+    if resp.clicked() {
+        a.search = Some(Default::default());
+    }
+}
+
+/// Lewa część paska: panele (szczegóły, warstwy, statystyka, pogoda), pomiar, soczewki i panorama.
+fn tools(a: &mut Atlas, ui: &mut egui::Ui) {
+    const W: f32 = 64.0;
+    for tab in Tab::ALL {
+        let on = a.prefs.panel_open && a.tab == tab && !(tab == Tab::Info && a.tool == Tool::Measure);
+        let n = match tab {
+            Tab::Layers => a.prefs.layers.iter().filter(|l| l.on).count() + a.prefs.feeds.len(),
+            _ => 0,
+        };
+        let label = if n > 0 { format!("{} · {n}", tab.label()) } else { tab.label().to_string() };
+        if theme::tool_tile(ui, tab.icon(), &label, on, W).on_hover_text(format!("{} ({})", tab.label(), tab.key())).clicked() {
+            if tab == Tab::Info && a.tool == Tool::Measure {
+                a.tool = Tool::Explore;
+                a.prefs.panel_open = true;
+                a.tab = Tab::Info;
+            } else {
+                toggle_tab(a, tab);
+            }
+        }
+    }
+    theme::bar_divider(ui);
+    if theme::tool_tile(ui, theme::icon::RULER, "Pomiar", a.tool == Tool::Measure, W).on_hover_text("Pomiar odległości, pola i linii wzroku (2)").clicked() {
+        if a.tool == Tool::Measure {
+            a.tool = Tool::Explore;
+        } else {
+            a.tool = Tool::Measure;
+            a.prefs.panel_open = true;
+            a.tab = Tab::Info;
+        }
+    }
+    theme::bar_divider(ui);
+    let lenses = [
+        (Lens::Band, theme::icon::WAVES, "Ta sama wys.", "Ta sama wysokość co pod kursorem (H)"),
+        (Lens::Rel, theme::icon::PLUS_MINUS, "Względna", "Wysokość względem miejsca pod kursorem (W)"),
+        (Lens::Vis, theme::icon::EYE, "Widoczność", "Co widać z miejsca pod kursorem (O)"),
+    ];
+    for (l, glyph, label, hint) in lenses {
+        if theme::tool_tile(ui, glyph, label, a.lens == l, W).on_hover_text(format!("{hint}\nklik na mapie przypina, Esc odpina")).clicked() {
+            a.set_lens(l);
+        }
+    }
+    theme::bar_divider(ui);
+    if theme::tool_tile(ui, theme::icon::MOUNTAINS, "Panorama", a.panorama.is_some(), W).on_hover_text("Panorama ze środka widoku (Esc – wyjście)").clicked() {
+        if a.panorama.is_some() {
+            a.exit_panorama();
+        } else {
+            let (lon, lat) = (a.cam.lon, a.cam.lat);
+            a.enter_panorama(lon, lat);
+        }
+    }
+}
+
+/// Rozwijane menu spod przycisku paska.
+fn bar_popup(ui: &egui::Ui, resp: &egui::Response, width: f32, body: impl FnOnce(&mut egui::Ui)) {
+    egui::Popup::menu(resp)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .frame(theme::glass().inner_margin(egui::Margin::same(14)))
+        .show(|ui| {
+            ui.set_width(width);
+            let max_h = (ui.ctx().screen_rect().bottom() - ui.cursor().top() - 24.0).max(160.0);
+            egui::ScrollArea::vertical().id_salt("menu-paska").max_height(max_h).show(ui, body);
+        });
+    let _ = ui;
+}
+
+fn popup_open(ui: &egui::Ui, resp: &egui::Response) -> bool {
+    egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(resp))
+}
+
+/// Pora dnia: godzina i ikona słońca; menu z datą, godziną i wschodem/zachodem.
+fn sun_button(a: &mut Atlas, ui: &mut egui::Ui) {
+    let (day, hour) = a.when();
+    let custom = a.prefs.custom_time.is_some();
+    let (_, alt) = a.sun();
+    let glyph = if alt > 6.0 {
+        theme::icon::SUN
+    } else if alt > -6.0 {
+        theme::icon::SUN_HORIZON
+    } else {
+        theme::icon::MOON_STARS
+    };
+    let sun_col = if custom {
+        theme::BRASS
+    } else if alt > 6.0 {
+        theme::WARN
+    } else if alt > -6.0 {
+        Color32::from_rgb(255, 150, 90)
+    } else {
+        Color32::from_rgb(160, 180, 255)
+    };
+    let sub = if custom { day.label() } else { "teraz".to_string() };
+    let id = egui::Id::new("pora-przycisk");
+    let was_open = ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    let resp = theme::bar_button(ui, glyph, sun_col, &fmt::hour(hour), &sub, 112.0, was_open)
+        .on_hover_text(if custom { "Pora ustawiona ręcznie ([ ] – pół godziny)" } else { "Oświetlenie jak teraz ([ ] – pół godziny)" });
+    bar_popup(ui, &resp, 340.0, |ui| {
+        ui.label(RichText::new("Pora dnia i światło").size(15.0).strong());
+        ui.add_space(4.0);
+        light_tab(a, ui);
+    });
+    let open = popup_open(ui, &resp);
+    ui.ctx().data_mut(|d| d.insert_temp(id, open));
+}
+
+fn style_glyph(st: Style) -> &'static str {
+    match st {
+        Style::Satellite => theme::icon::GLOBE_HEMISPHERE_EAST,
+        Style::Terrain => theme::icon::MOUNTAINS,
+        Style::Map => theme::icon::MAP_TRIFOLD,
+        Style::Hypso => theme::icon::CHART_BAR,
+        Style::Slope => theme::icon::ANGLE,
+        Style::Aspect => theme::icon::COMPASS,
+    }
+}
+
+/// Styl mapy: przycisk z bieżącym stylem, menu z kafelkami stylów.
+fn style_button(a: &mut Atlas, ui: &mut egui::Ui) {
+    let id = egui::Id::new("styl-przycisk");
+    let was_open = ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    let resp = theme::bar_button(ui, style_glyph(a.prefs.style), theme::BRASS, "Styl mapy", a.prefs.style.label(), 132.0, was_open).on_hover_text("Styl mapy (M – następny)");
+    bar_popup(ui, &resp, 340.0, |ui| style_tab(a, ui));
+    let open = popup_open(ui, &resp);
+    ui.ctx().data_mut(|d| d.insert_temp(id, open));
+}
+
+/// Widok: podstawowe składniki mapy (nazwy, szlaki, poziomice, cienie, ortofoto…).
+fn view_button(a: &mut Atlas, ui: &mut egui::Ui) {
+    let p = &a.prefs;
+    let n = [p.labels, p.trails, p.contours, p.km_grid, p.shadows, p.detail, p.snow, p.ortho, p.landcover, p.surface].iter().filter(|v| **v).count();
+    let id = egui::Id::new("widok-przycisk");
+    let was_open = ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    let resp = theme::bar_button(ui, theme::icon::EYE, theme::BRASS, "Widok", &format!("włączone: {n}"), 118.0, was_open).on_hover_text("Składniki mapy bazowej: nazwy, szlaki, poziomice, cienie");
+    bar_popup(ui, &resp, 360.0, |ui| layers_tab(a, ui));
+    let open = popup_open(ui, &resp);
+    ui.ctx().data_mut(|d| d.insert_temp(id, open));
+}
+
 /// Panel warstw: zestawy, włączone warstwy (krycie, kolejność, legenda) i katalog z wyszukiwarką.
-pub fn layers_panel(a: &mut Atlas, ctx: &egui::Context) {
-    use crate::layers::{self, catalog};
+pub fn layers_tick(a: &mut Atlas, ctx: &egui::Context) {
     // legendy pobrane w tle
     let inbox: Vec<_> = std::mem::take(&mut *a.legend_inbox.lock().unwrap());
     for (i, img) in inbox {
@@ -127,20 +279,16 @@ pub fn layers_panel(a: &mut Atlas, ctx: &egui::Context) {
         });
         a.legends.insert(i, tex);
     }
-    if !a.layers_open {
-        return;
-    }
-    let mut open = true;
-    egui::Window::new("Warstwy")
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .fixed_pos([82.0, TOP_Y])
-        .fixed_size([DRAWER_W, 620.0])
-        .show(ctx, |ui| {
+}
+
+/// Zakładka „Warstwy”: zestawy, dane na żywo, włączone warstwy (krycie, kolejność, legenda) i katalog z wyszukiwarką.
+fn layers_body(a: &mut Atlas, ui: &mut egui::Ui) {
+    use crate::layers::{self, catalog};
+    {
+        {
             ui.add(egui::TextEdit::singleline(&mut a.layer_query).hint_text(format!("Szukaj wśród {} warstw…", catalog().layers.len())).desired_width(f32::INFINITY));
             ui.add_space(4.0);
-            egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(590.0).show(ui, |ui| {
+            ui.scope(|ui| {
                 ui.label(theme::kicker("Zestawy"));
                 let builtin = catalog().presets.clone();
                 let mut pick = None;
@@ -202,27 +350,19 @@ pub fn layers_panel(a: &mut Atlas, ctx: &egui::Context) {
                         });
                 }
             });
-        });
-    if !open {
-        a.layers_open = false;
+        }
     }
 }
 
 /// Panel statystyki: wskaźnik GUS (temat → zmienna, albo wyszukiwarka), poziom, rok, klasy, legenda.
-pub fn stats_panel(a: &mut Atlas, ctx: &egui::Context) {
+fn stats_body(a: &mut Atlas, ui: &mut egui::Ui) {
     use crate::stats::{self, Level, Method};
-    if !a.stats_open {
-        return;
-    }
-    let mut open = true;
-    egui::Window::new("Statystyka GUS")
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .fixed_pos([82.0, TOP_Y])
-        .fixed_size([DRAWER_W, 620.0])
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(620.0).show(ui, |ui| {
+    let ctx = &ui.ctx().clone();
+    {
+        {
+            ui.scope(|ui| {
+                theme::para(ui, "Kartogram z Banku Danych Lokalnych GUS: wybierz wskaźnik z wyszukiwarki albo z drzewa tematów, potem poziom podziału i rok.");
+                ui.add_space(4.0);
                 let mut reload = false;
                 ui.horizontal(|ui| {
                     for l in Level::ALL {
@@ -313,9 +453,7 @@ pub fn stats_panel(a: &mut Atlas, ctx: &egui::Context) {
                     stats::load(&a.stats, v, a.stats_level, a.stats_year, a.stats_method, ctx);
                 }
             });
-        });
-    if !open {
-        a.stats_open = false;
+        }
     }
 }
 
@@ -356,8 +494,8 @@ fn subject_tree(a: &mut Atlas, ui: &mut egui::Ui, parent: &str, pick: &mut Optio
 }
 
 /// Panel pogody: pole barwne, oś czasu, cząstki wiatru i satelita.
-pub fn weather_panel(a: &mut Atlas, ctx: &egui::Context) {
-    use crate::weather::{self, Field};
+pub fn weather_tick(a: &mut Atlas, ctx: &egui::Context) {
+    use crate::weather;
     // odtwarzanie działa także przy zwiniętym panelu
     let grid = weather::grid();
     if a.weather_field.is_some() || a.wind_particles {
@@ -370,18 +508,15 @@ pub fn weather_panel(a: &mut Atlas, ctx: &egui::Context) {
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
-    if !a.weather_open {
-        return;
-    }
-    let mut open = true;
-    egui::Window::new("Pogoda")
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(false)
-        .fixed_pos([82.0, TOP_Y])
-        .default_width(DRAWER_W)
-        .show(ctx, |ui| {
-            ui.set_width(DRAWER_W);
+}
+
+/// Zakładka „Pogoda”: pole barwne, oś czasu, cząstki wiatru i satelita.
+fn weather_body(a: &mut Atlas, ui: &mut egui::Ui) {
+    use crate::weather::{self, Field};
+    let grid = weather::grid();
+    {
+        {
+            ui.label(theme::kicker("Pole na mapie"));
             ui.horizontal_wrapped(|ui| {
                 if ui.selectable_label(a.weather_field.is_none(), "Bez pola").clicked() {
                     a.weather_field = None;
@@ -419,7 +554,7 @@ pub fn weather_panel(a: &mut Atlas, ctx: &egui::Context) {
                 Some(g) => {
                     let mut h = a.weather_hour.unwrap_or_else(|| g.now_index());
                     ui.label(RichText::new(weather::time_label(g.times[h.min(g.times.len() - 1)])).size(18.0).strong());
-                    ui.spacing_mut().slider_width = DRAWER_W - 30.0;
+                    ui.spacing_mut().slider_width = ui.available_width() - 12.0;
                     if ui.add(egui::Slider::new(&mut h, 0..=g.times.len() - 1).show_value(false)).changed() {
                         a.weather_hour = Some(h);
                     }
@@ -438,9 +573,7 @@ pub fn weather_panel(a: &mut Atlas, ctx: &egui::Context) {
                 }
             }
             ui.label(RichText::new("Siatka co 0,5° (około 50 km), dwa dni wstecz i trzy naprzód.").small().color(theme::PAPER_3));
-        });
-    if !open {
-        a.weather_open = false;
+        }
     }
 }
 
@@ -590,10 +723,10 @@ fn active_layers_ui(a: &mut Atlas, ui: &mut egui::Ui) {
 }
 
 /// Szerokość prawego panelu szczegółów.
-const SIDEBAR_W: f32 = 440.0;
+const SIDEBAR_W: f32 = 460.0;
 
 fn sidebar_open(a: &Atlas) -> bool {
-    a.prefs.panel_open && a.tab == Tab::Info
+    a.prefs.panel_open
 }
 
 /// Odsunięcie elementów przy prawej krawędzi, gdy panel szczegółów jest otwarty.
@@ -609,9 +742,8 @@ pub fn sidebar(a: &mut Atlas, ctx: &egui::Context) {
             .anchor(egui::Align2::RIGHT_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 theme::glass().inner_margin(egui::Margin::symmetric(4, 10)).show(ui, |ui| {
-                    if ui.small_button(theme::icon::CARET_LEFT).on_hover_text("Pokaż szczegóły (P)").clicked() {
+                    if ui.small_button(theme::icon::CARET_LEFT).on_hover_text("Pokaż panel (P)").clicked() {
                         a.prefs.panel_open = true;
-                        a.tab = Tab::Info;
                     }
                 });
             });
@@ -630,16 +762,29 @@ pub fn sidebar(a: &mut Atlas, ctx: &egui::Context) {
             st.text_styles.insert(egui::TextStyle::Monospace, egui::FontId::monospace(14.0));
             st.text_styles.insert(egui::TextStyle::Small, egui::FontId::proportional(12.5));
             st.spacing.item_spacing.y = 7.0;
+            // zakładki panelu: jedno miejsce na szczegóły, warstwy, statystykę i pogodę
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Szczegóły").size(17.0).strong());
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let w = (ui.available_width() - 34.0 - 3.0 * 2.0) / 4.0;
+                for tab in Tab::ALL {
+                    if theme::tab_button(ui, tab.icon(), tab.label(), a.tab == tab, w).on_hover_text(format!("{} ({})", tab.label(), tab.key())).clicked() {
+                        a.tab = tab;
+                    }
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button(theme::icon::CARET_RIGHT).on_hover_text("Ukryj panel (P)").clicked() {
+                    if ui.add(egui::Button::new(RichText::new(theme::icon::CARET_RIGHT).size(16.0)).frame(false).min_size(egui::vec2(30.0, 30.0))).on_hover_text("Ukryj panel (P)").clicked() {
                         a.prefs.panel_open = false;
                     }
                 });
             });
+            ui.add_space(4.0);
             ui.separator();
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| info(a, ui));
+            egui::ScrollArea::vertical().id_salt(("panel", a.tab)).auto_shrink([false, false]).show(ui, |ui| match a.tab {
+                Tab::Info => info(a, ui),
+                Tab::Layers => layers_body(a, ui),
+                Tab::Stats => stats_body(a, ui),
+                Tab::Weather => weather_body(a, ui),
+            });
         });
 }
 
@@ -1166,20 +1311,6 @@ fn lens_info(a: &mut Atlas, ui: &mut egui::Ui) {
     }
 }
 
-/// Styl mapy, warstwy i słońce jako rozwijane menu na górnym pasku.
-pub fn view_menus(a: &mut Atlas, ui: &mut egui::Ui) {
-    let menu = |ui: &mut egui::Ui, a: &mut Atlas, glyph: &str, label: &str, body: fn(&mut Atlas, &mut egui::Ui)| {
-        ui.menu_button(format!("{glyph}  {label}"), |ui| {
-            ui.set_min_width(320.0);
-            body(a, ui);
-        });
-    };
-    let style = a.prefs.style.label();
-    menu(ui, a, theme::icon::PALETTE, style, style_tab);
-    menu(ui, a, theme::icon::STACK, "Widok", layers_tab);
-    menu(ui, a, theme::icon::SUN, "Słońce", light_tab);
-}
-
 fn style_tab(a: &mut Atlas, ui: &mut egui::Ui) {
     for st in Style::ALL {
         let glyph = match st {
@@ -1332,7 +1463,8 @@ pub fn help(a: &mut Atlas, ctx: &egui::Context) {
         ("H  W  O", "soczewka: ta sama wysokość · względna · widoczność"),
         ("/", "wyszukiwarka"),
         ("M", "następny styl mapy"),
-        ("P", "pokaż / ukryj panel szczegółów"),
+        ("P", "pokaż / ukryj panel boczny"),
+        ("G  B  K", "panel: warstwy · statystyka GUS · pogoda"),
         ("T  L  C", "szlaki · nazwy · poziomice"),
         ("klik z soczewką / Esc", "przypnij / odepnij soczewkę"),
         ("+  −", "przewyższenie terenu"),

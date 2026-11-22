@@ -150,12 +150,14 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
         s.sel = hits.len().saturating_sub(1);
     }
 
+    let field: Option<egui::Rect> = ctx.data(|d| d.get_temp(egui::Id::new("szukaj-pole-rect")));
     egui::Window::new("Szukaj")
         .title_bar(false)
         .collapsible(false)
         .resizable(false)
-        .anchor(egui::Align2::LEFT_TOP, [16.0, 16.0])
-        .fixed_size([420.0, 10.0])
+        // w miejscu pola wyszukiwarki na górnym pasku (albo pod paskiem na środku)
+        .fixed_pos(field.map_or(egui::pos2((ctx.screen_rect().center().x - 230.0).max(8.0), theme::TOP_BAR_H + 6.0), |r| r.left_top() - egui::vec2(8.0, 7.0)))
+        .fixed_size([field.map_or(460.0, |r| r.width().max(420.0)), 10.0])
         .show(ctx, |ui| {
             let r = ui.add(
                 egui::TextEdit::singleline(&mut s.q)
@@ -243,6 +245,7 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
             a.fly_to(p.lon, p.lat, Some(a.cam.distance.min(7000.0).max(2500.0)));
             a.selection = Selection::Poi(i);
             a.prefs.panel_open = true;
+            a.tab = crate::ui::panels::Tab::Info;
             open = false;
         }
         Some(Hit::Trail(ri)) => {
@@ -261,6 +264,7 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
             if let Some(&e) = edges.first() {
                 a.selection = Selection::Trail(e);
                 a.prefs.panel_open = true;
+                a.tab = crate::ui::panels::Tab::Info;
             }
             open = false;
         }

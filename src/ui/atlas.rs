@@ -289,8 +289,6 @@ pub struct Atlas {
     pub ctx_menu: Option<(Pos2, f64, f64, f32)>,
     pub search: Option<crate::ui::search::Search>,
     pub help: bool,
-    pub layers_open: bool,
-    pub weather_open: bool,
     pub weather_field: Option<crate::weather::Field>,
     pub weather_hour: Option<usize>,
     pub weather_play: bool,
@@ -298,7 +296,6 @@ pub struct Atlas {
     pub satellite: bool,
     pub wind_particles: bool,
     particles: Vec<(f64, f64, f32)>,
-    pub stats_open: bool,
     pub stats_bars: bool,
     pub stats_level: crate::stats::Level,
     pub stats_year: i32,
@@ -390,8 +387,6 @@ impl Atlas {
             ctx_menu: None,
             search: None,
             help: false,
-            layers_open: false,
-            weather_open: false,
             weather_field: None,
             weather_hour: None,
             weather_play: false,
@@ -399,7 +394,6 @@ impl Atlas {
             satellite: false,
             wind_particles: false,
             particles: Vec::new(),
-            stats_open: false,
             stats_bars: false,
             stats_level: crate::stats::Level::County,
             stats_year: 2023,
@@ -932,7 +926,14 @@ impl Atlas {
                     }
                 }
                 K::Num1 => self.tool = Tool::Explore,
-                K::Num2 => self.tool = Tool::Measure,
+                K::Num2 => {
+                    self.tool = Tool::Measure;
+                    self.prefs.panel_open = true;
+                    self.tab = crate::ui::panels::Tab::Info;
+                }
+                K::G => crate::ui::panels::toggle_tab(self, crate::ui::panels::Tab::Layers),
+                K::K => crate::ui::panels::toggle_tab(self, crate::ui::panels::Tab::Weather),
+                K::B => crate::ui::panels::toggle_tab(self, crate::ui::panels::Tab::Stats),
                 K::H | K::I => self.set_lens(Lens::Band),
                 K::W => self.set_lens(Lens::Rel),
                 K::O => self.set_lens(Lens::Vis),
