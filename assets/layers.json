@@ -1,8 +1,8 @@
 {
   "services": [
-    { "group": "Rzeźba terenu", "url": "https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/ShadedRelief", "crs": 4326, "attribution": "© GUGiK", "min_z": 7, "layers": [
+    { "group": "Rzeźba terenu", "url": "https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/ShadedRelief", "kind": "global", "crs": 4326, "attribution": "© GUGiK", "min_z": 7, "layers": [
       { "id": "gugik.nmt.cieniowanie", "name": "Cieniowanie NMT (1 m)", "layer": "Raster", "desc": "Cieniowanie rzeźby z numerycznego modelu terenu.", "opacity": 0.6 } ] },
-    { "group": "Rzeźba terenu", "url": "https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/Hypsometry", "attribution": "© GUGiK", "min_z": 7, "layers": [
+    { "group": "Rzeźba terenu", "url": "https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/Hypsometry", "kind": "global", "attribution": "© GUGiK", "min_z": 7, "layers": [
       { "id": "gugik.nmt.hipsometria", "name": "Hipsometria NMT", "layer": "Raster", "desc": "Barwy wysokości z numerycznego modelu terenu.", "opacity": 0.6 } ] },
     { "group": "Granice i adresy", "url": "https://mapy.geoportal.gov.pl/wss/service/PZGIK/PRG/WMS/AdministrativeBoundaries", "attribution": "PRG © GUGiK", "min_z": 5, "layers": [
       { "id": "gugik.prg.wojewodztwa", "name": "Województwa", "layer": "A01_Granice_wojewodztw", "opacity": 1.0 },
@@ -15,13 +15,13 @@
     { "group": "Działki i budynki", "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow", "attribution": "KIEG © GUGiK, powiaty", "min_z": 15, "layers": [
       { "id": "gugik.kieg.dzialki", "name": "Działki ewidencyjne", "layer": "dzialki", "opacity": 1.0 },
       { "id": "gugik.kieg.budynki", "name": "Budynki (EGiB)", "layer": "budynki", "opacity": 1.0 },
-      { "id": "gugik.kieg.kontury", "name": "Kontury klasyfikacyjne", "layer": "kontury", "opacity": 1.0 },
-      { "id": "gugik.kieg.uzytki", "name": "Użytki gruntowe", "layer": "uzytki", "opacity": 1.0 },
+      { "id": "gugik.kieg.kontury", "name": "Kontury klasyfikacyjne", "layer": "kontury", "opacity": 0.8, "kind": "global" },
+      { "id": "gugik.kieg.uzytki", "name": "Użytki gruntowe", "layer": "uzytki", "opacity": 0.8, "kind": "global" },
       { "id": "gugik.kieg.obreby", "name": "Granice obrębów (KIEG)", "layer": "obreby", "opacity": 1.0, "min_z": 12 } ] },
     { "group": "Planowanie przestrzenne", "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego", "attribution": "© GUGiK, gminy", "min_z": 11, "layers": [
       { "id": "gugik.mpzp.granice", "name": "Granice planów miejscowych", "layer": "plany_granice", "opacity": 1.0 },
-      { "id": "gugik.mpzp.raster", "name": "Plany rastrowe", "layer": "raster", "opacity": 0.7, "min_z": 13 },
-      { "id": "gugik.mpzp.strefy", "name": "Plany wektorowe – strefy", "layer": "wektor-str", "opacity": 0.7, "min_z": 13 },
+      { "id": "gugik.mpzp.raster", "name": "Plany rastrowe", "layer": "raster", "opacity": 0.7, "min_z": 13, "kind": "global" },
+      { "id": "gugik.mpzp.strefy", "name": "Plany wektorowe – strefy", "layer": "wektor-str", "opacity": 0.7, "min_z": 13, "kind": "global" },
       { "id": "gugik.mpzp.zabudowa", "name": "Plany wektorowe – linie zabudowy", "layer": "wektor-lzb", "opacity": 1.0, "min_z": 14 } ] },
     { "group": "Uzbrojenie terenu", "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu", "attribution": "KIUT © GUGiK, powiaty", "min_z": 15, "layers": [
       { "id": "gugik.kiut.woda", "name": "Sieć wodociągowa", "layer": "przewod_wodociagowy", "opacity": 1.0 },
@@ -47,11 +47,11 @@
       { "id": "bdl.nadlesnictwa", "name": "Nadleśnictwa", "layer": "5", "opacity": 1.0 },
       { "id": "bdl.lesnictwa", "name": "Leśnictwa", "layer": "4", "opacity": 1.0, "min_z": 10 },
       { "id": "bdl.oddzialy", "name": "Oddziały leśne", "layer": "3", "opacity": 1.0, "min_z": 12 },
-      { "id": "bdl.wydzielenia", "name": "Wydzielenia leśne", "layer": "1", "opacity": 1.0, "min_z": 14 } ] },
-    { "group": "Geologia", "url": "https://cbdgmapa.pgi.gov.pl/arcgis/services/kartografia/smgp50k/MapServer/WMSServer", "attribution": "SMGP © PIG-PIB", "min_z": 9, "layers": [
+      { "id": "bdl.wydzielenia", "name": "Wydzielenia leśne", "layer": "1", "opacity": 0.8, "min_z": 14, "kind": "global" } ] },
+    { "group": "Geologia", "kind": "global", "url": "https://cbdgmapa.pgi.gov.pl/arcgis/services/kartografia/smgp50k/MapServer/WMSServer", "attribution": "SMGP © PIG-PIB", "min_z": 9, "layers": [
       { "id": "pig.smgp.wydzielenia", "name": "Mapa geologiczna 1:50 000 – wydzielenia", "layer": "0", "opacity": 0.7 },
-      { "id": "pig.smgp.granice", "name": "Mapa geologiczna 1:50 000 – granice", "layer": "2", "opacity": 1.0 },
-      { "id": "pig.smgp.skorowidz", "name": "Mapa geologiczna 1:50 000 – skorowidz arkuszy", "layer": "5", "opacity": 1.0, "min_z": 6 } ] },
+      { "id": "pig.smgp.granice", "name": "Mapa geologiczna 1:50 000 – granice", "layer": "2", "opacity": 1.0, "kind": "objects" },
+      { "id": "pig.smgp.skorowidz", "name": "Mapa geologiczna 1:50 000 – skorowidz arkuszy", "layer": "5", "opacity": 1.0, "min_z": 6, "kind": "objects" } ] },
     { "group": "Łączność", "url": "https://si2pem.gov.pl/geoserver/public/wms", "attribution": "SI2PEM", "min_z": 9, "layers": [
       { "id": "si2pem.bts", "name": "Stacje bazowe telefonii", "layer": "base_stations", "opacity": 1.0 },
       { "id": "si2pem.rtv", "name": "Stacje radiowo-telewizyjne", "layer": "broadcasting_stations", "opacity": 1.0 } ] }

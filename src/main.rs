@@ -7,6 +7,7 @@
 mod analysis;
 mod app;
 mod bake;
+mod coords;
 mod download;
 mod feedback;
 mod feeds;
@@ -16,6 +17,7 @@ mod gpx;
 mod heights;
 mod landcover;
 mod layers;
+mod library;
 mod metrics;
 mod mvt;
 mod national;

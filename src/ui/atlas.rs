@@ -23,6 +23,9 @@ use crate::sun::{self, Day};
 use crate::ui::theme;
 use crate::world::{Snapshot, World};
 
+mod actions;
+pub use actions::{Action, BaseLayer, Group, Keys};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Tool {
     Explore,
@@ -159,6 +162,12 @@ pub struct Prefs {
     pub layers: Vec<LayerState>,
     /// Włączone dane na żywo.
     pub feeds: Vec<String>,
+    /// Legenda w lewym dolnym rogu mapy.
+    pub legend: bool,
+    /// Zapis współrzędnych w całym interfejsie.
+    pub coord_format: crate::coords::CoordFormat,
+    /// Otwarta część panelu warstw: globalne albo obiekty.
+    pub layer_kind: crate::layers::Kind,
 }
 
 impl Default for Prefs {
@@ -194,6 +203,9 @@ impl Default for Prefs {
             surface: false,
             layers: Vec::new(),
             feeds: Vec::new(),
+            legend: true,
+            coord_format: crate::coords::CoordFormat::Dms,
+            layer_kind: crate::layers::Kind::Global,
         }
     }
 }
@@ -244,7 +256,10 @@ enum JobResult {
 /// Prośby atlasu do aplikacji.
 #[derive(Default)]
 pub struct Requests {
+    /// Ustawienia na stronie danych map.
     pub open_settings: bool,
+    /// Ustawienia na pierwszej stronie.
+    pub open_general: bool,
     pub check_updates: bool,
 }
 
@@ -316,6 +331,13 @@ pub struct Atlas {
     pub legends: std::collections::HashMap<u16, Option<egui::TextureHandle>>,
     pub legend_asked: std::collections::HashSet<u16>,
     pub tab: crate::ui::panels::Tab,
+    /// Paleta poleceń (Ctrl+K).
+    pub palette: Option<crate::ui::palette::Palette>,
+    /// Ulubione miejsca i zapisane widoki.
+    pub library: crate::library::Library,
+    pub lib_query: String,
+    /// Zmiana nazwy w bibliotece: (identyfikator, nowa nazwa).
+    pub lib_edit: Option<(u64, String)>,
     pub toast: Option<(String, Instant)>,
     pub last_view: Option<View>,
     fps: (Instant, u32, f32),
@@ -346,6 +368,7 @@ impl Atlas {
         let (lon, lat, height, heading, pitch, distance) = prefs.camera;
         let cam = Camera { lon, lat, height, heading, pitch, distance, ..Camera::default() };
         metrics::set_model(if prefs.din { TimeModel::Din } else { TimeModel::Pttk }, prefs.pace);
+        crate::coords::set_format(prefs.coord_format);
         let (tx, rx) = channel();
         Atlas {
             frame: Frame::at(lon, lat),
@@ -411,6 +434,10 @@ impl Atlas {
             legends: Default::default(),
             legend_asked: Default::default(),
             tab: crate::ui::panels::Tab::Info,
+            palette: None,
+            library: crate::library::Library::load(),
+            lib_query: String::new(),
+            lib_edit: None,
             toast: None,
             last_view: None,
             fps: (Instant::now(), 0, 0.0),
@@ -903,81 +930,27 @@ impl Atlas {
             self.help = !self.help;
         }
         for (key, m) in events {
-            if m.ctrl || m.command {
+            if key == egui::Key::Escape && !(m.ctrl || m.command) {
+                if self.help {
+                    self.help = false;
+                } else if self.ctx_menu.is_some() {
+                    self.ctx_menu = None;
+                } else if self.panorama.is_some() {
+                    self.exit_panorama();
+                } else if self.lens_pin.is_some() {
+                    self.unpin_lens();
+                } else if self.lens != Lens::None {
+                    self.lens = Lens::None;
+                } else if self.selection != Selection::None {
+                    self.selection = Selection::None;
+                } else {
+                    self.tool = Tool::Explore;
+                }
                 continue;
             }
-            use egui::Key as K;
-            match key {
-                K::Escape => {
-                    if self.help {
-                        self.help = false;
-                    } else if self.ctx_menu.is_some() {
-                        self.ctx_menu = None;
-                    } else if self.panorama.is_some() {
-                        self.exit_panorama();
-                    } else if self.lens_pin.is_some() {
-                        self.unpin_lens();
-                    } else if self.lens != Lens::None {
-                        self.lens = Lens::None;
-                    } else if self.selection != Selection::None {
-                        self.selection = Selection::None;
-                    } else {
-                        self.tool = Tool::Explore;
-                    }
-                }
-                K::Num1 => self.tool = Tool::Explore,
-                K::Num2 => {
-                    self.tool = Tool::Measure;
-                    self.prefs.panel_open = true;
-                    self.tab = crate::ui::panels::Tab::Info;
-                }
-                K::G => crate::ui::panels::toggle_tab(self, crate::ui::panels::Tab::Layers),
-                K::K => crate::ui::panels::toggle_tab(self, crate::ui::panels::Tab::Weather),
-                K::B => crate::ui::panels::toggle_tab(self, crate::ui::panels::Tab::Stats),
-                K::H | K::I => self.set_lens(Lens::Band),
-                K::W => self.set_lens(Lens::Rel),
-                K::O => self.set_lens(Lens::Vis),
-                K::Slash => self.search = Some(crate::ui::search::Search::default()),
-                K::M => {
-                    // styl mapy jest w menu górnego paska; skrót przełącza na następny
-                    let all = Style::ALL;
-                    let i = all.iter().position(|s| *s == self.prefs.style).unwrap_or(0);
-                    self.prefs.style = all[(i + 1) % all.len()];
-                }
-                K::P => self.prefs.panel_open = !self.prefs.panel_open,
-                K::T => self.prefs.trails = !self.prefs.trails,
-                K::L => self.prefs.labels = !self.prefs.labels,
-                K::C => self.prefs.contours = !self.prefs.contours,
-                K::N => {
-                    let mut to = self.cam;
-                    to.heading = 0.0;
-                    self.start_fly(to, 0.7);
-                }
-                K::V => {
-                    let mut to = self.cam;
-                    to.pitch = if self.cam.pitch > 75.0 { 40.0 } else { 89.0 };
-                    self.start_fly(to, 0.7);
-                }
-                K::R => {
-                    let d = Camera::default();
-                    let mut to = self.cam;
-                    to.heading = d.heading;
-                    to.pitch = d.pitch;
-                    to.distance = d.distance.min(self.cam.distance.max(8000.0));
-                    self.start_fly(to, 0.9);
-                }
-                K::S => self.screenshot(ctx),
-                K::OpenBracket => self.shift_hour(-0.5),
-                K::CloseBracket => self.shift_hour(0.5),
-                K::Plus | K::Equals => self.prefs.exag = ((self.prefs.exag + 0.1) * 10.0).round() / 10.0,
-                K::Minus => self.prefs.exag = (((self.prefs.exag - 0.1) * 10.0).round() / 10.0).max(1.0),
-                K::Backspace | K::Delete => {
-                    if self.tool == Tool::Measure && !self.measure.is_empty() {
-                        self.measure.pop();
-                        self.start_los();
-                    }
-                }
-                _ => {}
+            // pozostałe klawisze: jeden rejestr poleceń (skróty, paleta Ctrl+K, okno pomocy)
+            if let Some(act) = Action::for_key(key, m) {
+                self.run(act, ctx);
             }
         }
         self.prefs.exag = self.prefs.exag.clamp(1.0, 3.0);
@@ -1027,14 +1000,117 @@ impl Atlas {
         self.move_target((g.x - hit.x).clamp(-lim, lim), (g.z - hit.z).clamp(-lim, lim));
     }
 
-    /// Włączone warstwy od spodu: (indeks w katalogu, krycie).
+    /// Włączone warstwy od spodu: (indeks w katalogu, krycie) – najpierw globalne, nad nimi obiekty,
+    /// w każdej grupie w kolejności z panelu.
     pub fn active_layers(&self) -> Vec<(u16, f32)> {
+        let mut v = self.active_of(crate::layers::Kind::Global);
+        v.extend(self.active_of(crate::layers::Kind::Objects));
+        v
+    }
+
+    /// Włączone warstwy z katalogu jednego rodzaju, od spodu.
+    pub fn active_of(&self, k: crate::layers::Kind) -> Vec<(u16, f32)> {
         self.prefs
             .layers
             .iter()
             .filter(|l| l.on)
             .filter_map(|l| Some((crate::layers::index_of(&l.id)?, l.opacity)))
+            .filter(|(i, _)| crate::layers::kind_of(*i) == k)
             .collect()
+    }
+
+    /// Stos nakładek do rysowania, od spodu: kartogram GUS, globalne z katalogu, obraz satelitarny,
+    /// pole pogody, a na wierzchu obiekty z katalogu.
+    fn overlay_stack(&self) -> Vec<(u16, f32)> {
+        let mut v = Vec::new();
+        if let Some(i) = crate::stats::overlay() {
+            v.push((i, 0.8));
+        }
+        v.extend(self.active_of(crate::layers::Kind::Global));
+        if self.satellite {
+            v.push((crate::weather::satellite_overlay(), 0.75));
+        }
+        if let (Some(f), Some(g)) = (self.weather_field, crate::weather::grid()) {
+            let hour = self.weather_hour.unwrap_or_else(|| g.now_index());
+            v.push((g.overlay(f, hour), 0.75));
+        }
+        v.extend(self.active_of(crate::layers::Kind::Objects));
+        v
+    }
+
+    /// Odległość kamery, z której widać kafle warstwy od poziomu `z` (z zapasem).
+    pub fn distance_for_zoom(&self, z: u8) -> f64 {
+        let span = 40_075_016.0 * self.cam.lat.to_radians().cos() / (1u64 << z.min(24)) as f64;
+        (span * 2.2).clamp(self.min_dist().max(150.0), 900_000.0)
+    }
+
+    // ------------------------------------------------------------------ biblioteka
+
+    /// Zapisuje bieżący widok (kamera, styl, włączone warstwy) w bibliotece.
+    pub fn save_view(&mut self) {
+        let c = self.panorama.unwrap_or(self.cam);
+        let base = self.name_near(c.lon, c.lat, 3000.0).unwrap_or_else(|| "Widok".to_string());
+        let name = self.library.unique_name(&base);
+        let mut layers: Vec<LayerState> = Vec::new();
+        for k in crate::layers::Kind::ALL {
+            for (i, _) in self.active_of(k) {
+                let id = &crate::layers::catalog().layers[i as usize].id;
+                if let Some(l) = self.prefs.layers.iter().find(|l| &l.id == id) {
+                    layers.push(l.clone());
+                }
+            }
+        }
+        let v = crate::library::SavedView {
+            id: self.library.next_id(),
+            name: name.clone(),
+            camera: (c.lon, c.lat, c.height, c.heading, c.pitch, c.distance),
+            style: self.prefs.style,
+            exag: self.prefs.exag,
+            layers,
+            feeds: self.prefs.feeds.clone(),
+            created: crate::library::now(),
+        };
+        self.library.views.insert(0, v);
+        self.store_library();
+        self.notify(format!("Zapisano widok „{name}” w bibliotece (Z)."));
+    }
+
+    /// Dodaje miejsce do ulubionych.
+    pub fn add_place(&mut self, name: &str, lon: f64, lat: f64) {
+        let name = self.library.unique_name(name);
+        let p = crate::library::Place { id: self.library.next_id(), name: name.clone(), lon, lat, note: String::new(), created: crate::library::now() };
+        self.library.places.insert(0, p);
+        self.store_library();
+        self.notify(format!("Dodano „{name}” do ulubionych (Z)."));
+    }
+
+    pub fn store_library(&mut self) {
+        if let Err(e) = self.library.save() {
+            self.notify(format!("Nie udało się zapisać biblioteki: {e}"));
+        }
+    }
+
+    /// Otwiera zapisany widok: styl, warstwy w zapisanej kolejności i przelot kamery.
+    pub fn apply_view(&mut self, v: &crate::library::SavedView) {
+        self.prefs.style = v.style;
+        self.prefs.exag = v.exag.clamp(1.0, 3.0);
+        for l in &mut self.prefs.layers {
+            l.on = false;
+        }
+        // zapisane warstwy na koniec listy, w zapisanej kolejności (od spodu)
+        for saved in &v.layers {
+            if let Some(pos) = self.prefs.layers.iter().position(|l| l.id == saved.id) {
+                let mut l = self.prefs.layers.remove(pos);
+                l.on = true;
+                l.opacity = saved.opacity.clamp(0.05, 1.0);
+                self.prefs.layers.push(l);
+            }
+        }
+        self.prefs.feeds = v.feeds.iter().filter(|f| crate::feeds::FEEDS.iter().any(|d| d.id == f.as_str())).cloned().collect();
+        let (lon, lat, height, heading, pitch, distance) = v.camera;
+        let cam = Camera { lon, lat, height, heading, pitch, distance, ..self.cam };
+        self.exit_panorama();
+        self.start_fly(cam, 1.4);
     }
 
     /// Czy minął czas na następną klatkę odtwarzania pogody.
@@ -1179,18 +1255,8 @@ impl Atlas {
 
         let scene = self.scene(&view);
         let lines = self.dyn_lines(&view);
-        let mut overlays = self.active_layers();
-        if self.satellite {
-            overlays.push((crate::weather::satellite_overlay(), 0.75));
-        }
-        if let (Some(f), Some(g)) = (self.weather_field, crate::weather::grid()) {
-            let hour = self.weather_hour.unwrap_or_else(|| g.now_index());
-            overlays.push((g.overlay(f, hour), 0.75));
-        }
-        if let Some(i) = crate::stats::overlay() {
-            // kartogram pod warstwami tematycznymi
-            overlays.insert(0, (i, 0.8));
-        }
+        // warstwy globalne pod spodem, obiekty na wierzchu
+        let overlays = self.overlay_stack();
         let ppp = ctx.pixels_per_point();
         if let Some(r) = &mut self.renderer {
             let key = self.snap.version * 1_000_000 + self.frame_version * 2 + self.prefs.trails as u64;
@@ -1361,7 +1427,7 @@ impl Atlas {
                     // szlak w pobliżu kliknięcia (promień zależny od odległości)
                     let r = (self.cam.distance * 0.006).clamp(15.0, 400.0);
                     // przy włączonych warstwach klik pyta o miejsce, a nie wybiera szlaku
-                    if self.prefs.trails && self.active_layers().is_empty() {
+                    if self.prefs.trails && self.active_of(crate::layers::Kind::Objects).is_empty() {
                         if let Some(s) = self.snap.graph.snap(lon, lat, r) {
                             self.selection = Selection::Trail(s.edge);
                             self.prefs.panel_open = true;
@@ -1833,7 +1899,7 @@ impl Atlas {
             let aspect = (-gx).atan2(-gy).to_degrees().rem_euclid(360.0);
             info = format!(
                 "{}   {}   nachylenie {}°   ekspozycja {}",
-                fmt::coords(lon, lat),
+                crate::coords::format_pos(lon, lat),
                 fmt::ele(e as f64),
                 slope.round(),
                 fmt::compass(aspect)
@@ -1930,7 +1996,7 @@ impl Atlas {
             egui::Area::new(egui::Id::new("menu-3d")).fixed_pos(pos).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
                 theme::card(false).show(ui, |ui| {
                     ui.set_width(230.0);
-                    ui.label(egui::RichText::new(format!("{}  ·  {}", fmt::decimal(lon, lat), fmt::ele(e as f64))).small().monospace().color(theme::PAPER_3));
+                    ui.label(egui::RichText::new(format!("{}  ·  {}", crate::coords::format_pos(lon, lat), fmt::ele(e as f64))).small().monospace().color(theme::PAPER_3));
                     let mut item = |ui: &mut egui::Ui, t: &str| ui.add(egui::Button::new(t).frame(false)).clicked();
                     if item(ui, "Ta sama wysokość") {
                         self.pin_lens(lon, lat, Lens::Band);
@@ -1961,8 +2027,13 @@ impl Atlas {
                         self.prefs.panel_open = true;
                         close = true;
                     }
+                    if item(ui, "Dodaj do ulubionych") {
+                        let name = self.name_near(lon, lat, 600.0).unwrap_or_else(|| "Miejsce".to_string());
+                        self.add_place(&name, lon, lat);
+                        close = true;
+                    }
                     if item(ui, "Kopiuj współrzędne") {
-                        ui.ctx().copy_text(fmt::decimal(lon, lat));
+                        ui.ctx().copy_text(crate::coords::format_pos(lon, lat));
                         self.notify("Skopiowano współrzędne.");
                         close = true;
                     }

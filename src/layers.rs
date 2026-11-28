@@ -1,5 +1,10 @@
 //! Warstwy tematyczne: katalog usług (`assets/layers.json`), kafle WMS w Web Mercatorze z pamięcią
 //! na dysku (`overlays\<warstwa>\z\x_y.png`), legendy i zestawy warstw.
+//!
+//! Warstwy dzielą się na dwa rodzaje ([`Kind`]): **globalne** – barwią całą powierzchnię mapy
+//! (cieniowanie, hipsometria, geologia, użytki, strefy planów; poza katalogiem także pola pogody
+//! i kartogramy) i leżą zawsze pod spodem, oraz **obiekty** – pokazują rzeczy na mapie (granice,
+//! działki, budynki, sieci, formy ochrony przyrody, maszty, punkty) i są rysowane nad globalnymi.
 
 use std::collections::HashMap;
 use std::fs;
@@ -23,9 +28,47 @@ struct Raw {
     presets: Vec<Preset>,
 }
 
+/// Rodzaj warstwy: pokrycie całej mapy albo obiekty na mapie.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// Barwi całą powierzchnię (rysowana pod obiektami).
+    Global,
+    /// Pokazuje obiekty: granice, punkty, linie, budynki.
+    #[default]
+    Objects,
+}
+
+impl Kind {
+    pub const ALL: [Kind; 2] = [Kind::Global, Kind::Objects];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Kind::Global => "Globalne",
+            Kind::Objects => "Obiekty",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Kind::Global => "Warstwy globalne",
+            Kind::Objects => "Obiekty na mapie",
+        }
+    }
+
+    pub fn desc(self) -> &'static str {
+        match self {
+            Kind::Global => "Barwią całą mapę: podkład, rzeźba, pokrycie, geologia, plany, pogoda i kartogramy. Leżą pod obiektami.",
+            Kind::Objects => "Pokazują rzeczy na mapie: nazwy, szlaki, granice, działki, budynki, sieci, punkty i dane na żywo. Zawsze nad warstwami globalnymi.",
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct RawService {
     group: String,
+    #[serde(default)]
+    kind: Kind,
     url: String,
     #[serde(default = "merc")]
     crs: u32,
@@ -44,6 +87,7 @@ struct RawLayer {
     min_z: Option<u8>,
     #[serde(default = "full")]
     opacity: f32,
+    kind: Option<Kind>,
 }
 
 fn merc() -> u32 {
@@ -63,6 +107,7 @@ pub struct LayerDef {
     pub attribution: String,
     pub min_z: u8,
     pub opacity: f32,
+    pub kind: Kind,
     url: String,
     crs: u32,
     layer: String,
@@ -94,6 +139,7 @@ pub fn catalog() -> &'static Catalog {
                     attribution: s.attribution.clone(),
                     min_z: l.min_z.unwrap_or(s.min_z),
                     opacity: l.opacity,
+                    kind: l.kind.unwrap_or(s.kind),
                     url: s.url.clone(),
                     crs: s.crs,
                     layer: l.layer,
@@ -107,6 +153,11 @@ pub fn catalog() -> &'static Catalog {
 /// Najniższy poziom warstwy (kartogram jest widoczny zawsze).
 pub fn min_z(i: u16) -> u8 {
     catalog().layers.get(i as usize).map_or(0, |l| l.min_z)
+}
+
+/// Rodzaj warstwy z kolejki kafli (spoza katalogu – globalna: pogoda, satelita, kartogram).
+pub fn kind_of(i: u16) -> Kind {
+    catalog().layers.get(i as usize).map_or(Kind::Global, |l| l.kind)
 }
 
 pub fn index_of(id: &str) -> Option<u16> {
@@ -284,6 +335,13 @@ mod tests {
                 assert!(ids.contains(l.as_str()), "{l}");
             }
         }
+        // oba rodzaje są w katalogu; cieniowanie barwi całą mapę, działki to obiekty
+        for k in Kind::ALL {
+            assert!(c.layers.iter().any(|l| l.kind == k), "{k:?}");
+        }
+        assert_eq!(kind_of(index_of("gugik.nmt.cieniowanie").unwrap()), Kind::Global);
+        assert_eq!(kind_of(index_of("gugik.kieg.dzialki").unwrap()), Kind::Objects);
+        assert_eq!(kind_of(crate::weather::FIELD_BASE), Kind::Global);
     }
 
     #[test]
@@ -291,7 +349,7 @@ mod tests {
         let t = crate::geo::tile_at(19.94, 50.06, 12);
         let def = LayerDef {
             id: "x".into(), name: String::new(), group: String::new(), desc: String::new(), attribution: String::new(),
-            min_z: 0, opacity: 1.0, url: "https://a/wms".into(), crs: 4326, layer: "L".into(),
+            min_z: 0, opacity: 1.0, kind: Kind::Global, url: "https://a/wms".into(), crs: 4326, layer: "L".into(),
         };
         let u = def.getmap(t);
         let bbox = u.split("BBOX=").nth(1).unwrap().split('&').next().unwrap();

@@ -1,5 +1,6 @@
 //! Wyszukiwarka (`/`): szczyty, schroniska, przełęcze i miejscowości z okolicy, szlaki (także po kolorze)
-//! oraz miejsca w Polsce (Nominatim).
+//! oraz miejsca w Polsce (Nominatim), adresy i działki (GUGiK), współrzędne w każdym zapisie
+//! (stopnie, UTM, MGRS, PL-1992, PL-2000) i pozycje z biblioteki.
 
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
@@ -24,10 +25,24 @@ pub struct Search {
     focused: bool,
 }
 
+#[derive(Clone, Copy)]
 enum Hit {
     Poi(usize),
     Trail(usize),
     Place(usize),
+    /// Wpisane współrzędne (dł., szer.).
+    Coord(f64, f64),
+    /// Ulubione miejsce z biblioteki.
+    Fav(u64),
+    /// Zapisany widok z biblioteki.
+    View(u64),
+}
+
+impl Search {
+    /// Wyszukiwarka z wpisanym już tekstem (np. z palety poleceń).
+    pub fn with_query(q: &str) -> Self {
+        Search { q: q.to_string(), typed: Some(Instant::now() - Duration::from_secs(1)), ..Default::default() }
+    }
 }
 
 /// Porównanie bez wielkości liter i polskich znaków.
@@ -119,7 +134,22 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
 
     // wyniki lokalne
     let mut hits: Vec<(Hit, String, String)> = Vec::new();
+    if let Some((lon, lat)) = crate::coords::parse(s.q.trim()) {
+        let inside = crate::national::in_poland(lon, lat);
+        let sub = if inside { format!("{lat:.5}, {lon:.5}") } else { format!("{lat:.5}, {lon:.5} · poza Polską – pokażę najbliższy punkt") };
+        hits.push((Hit::Coord(lon, lat), crate::coords::format_pos(lon, lat), sub));
+    }
     if !q.is_empty() {
+        for v in &a.library.views {
+            if fold(&v.name).contains(&q) {
+                hits.push((Hit::View(v.id), v.name.clone(), format!("zapisany widok · {}", v.summary())));
+            }
+        }
+        for p in &a.library.places {
+            if fold(&p.name).contains(&q) {
+                hits.push((Hit::Fav(p.id), p.name.clone(), "ulubione miejsce".to_string()));
+            }
+        }
         let color = COLOR_WORDS.iter().find(|(pl, _)| q.starts_with(pl) || pl.starts_with(&q) && q.len() >= 4).map(|c| c.1);
         for (i, p) in a.snap.pois.iter().enumerate() {
             if fold(&p.poi.name).contains(&q) {
@@ -161,7 +191,7 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
         .show(ctx, |ui| {
             let r = ui.add(
                 egui::TextEdit::singleline(&mut s.q)
-                    .hint_text("Miejscowość, adres, działka, szczyt, szlak…")
+                    .hint_text("Miejscowość, adres, działka, szczyt, szlak, współrzędne…")
                     .desired_width(f32::INFINITY)
                     .font(egui::TextStyle::Body)
                     .margin(egui::Margin::symmetric(10, 8)),
@@ -195,11 +225,7 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
             if enter && s.q.trim().starts_with("psm://") {
                 link = Some(s.q.trim().to_string());
             } else if enter && !hits.is_empty() {
-                choose = Some(match hits[s.sel].0 {
-                    Hit::Poi(i) => Hit::Poi(i),
-                    Hit::Trail(i) => Hit::Trail(i),
-                    Hit::Place(i) => Hit::Place(i),
-                });
+                choose = Some(hits[s.sel].0);
             }
             ui.add_space(4.0);
             egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
@@ -210,11 +236,7 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
                         ui.label(RichText::new(sub).small().color(theme::PAPER_3));
                     });
                     if resp.response.interact(egui::Sense::click()).clicked() {
-                        choose = Some(match h {
-                            Hit::Poi(i) => Hit::Poi(*i),
-                            Hit::Trail(i) => Hit::Trail(*i),
-                            Hit::Place(i) => Hit::Place(*i),
-                        });
+                        choose = Some(*h);
                     }
                 }
                 if s.pending.is_some() {
@@ -273,6 +295,29 @@ pub fn show(a: &mut Atlas, ctx: &egui::Context) {
             match p.bbox {
                 Some(b) if b.km2() > 2.0 && b.km2() < 200_000.0 => a.fit_bbox(&b),
                 _ => a.fly_to(p.lon, p.lat, Some(8000.0)),
+            }
+            open = false;
+        }
+        Some(Hit::Coord(lon, lat)) => {
+            let (lon, lat) = crate::national::clamp_to_poland(lon, lat);
+            a.fly_to(lon, lat, Some(a.cam.distance.clamp(1500.0, 6000.0)));
+            a.selection = Selection::Point { lon, lat };
+            a.prefs.panel_open = true;
+            a.tab = crate::ui::panels::Tab::Info;
+            open = false;
+        }
+        Some(Hit::Fav(id)) => {
+            if let Some(p) = a.library.places.iter().find(|p| p.id == id).cloned() {
+                a.fly_to(p.lon, p.lat, Some(a.cam.distance.clamp(1500.0, 6000.0)));
+                a.selection = Selection::Point { lon: p.lon, lat: p.lat };
+                a.prefs.panel_open = true;
+                a.tab = crate::ui::panels::Tab::Info;
+            }
+            open = false;
+        }
+        Some(Hit::View(id)) => {
+            if let Some(v) = a.library.views.iter().find(|v| v.id == id).cloned() {
+                a.apply_view(&v);
             }
             open = false;
         }
