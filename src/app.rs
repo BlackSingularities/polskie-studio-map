@@ -42,13 +42,15 @@ struct Moving {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     General,
+    Map,
     Graphics,
     Data,
     About,
 }
 
-const PAGES: [(Page, &str, &str); 4] = [
+const PAGES: [(Page, &str, &str); 5] = [
     (Page::General, theme::icon::SLIDERS_HORIZONTAL, "Ogólne"),
+    (Page::Map, theme::icon::MAP_TRIFOLD, "Mapa"),
     (Page::Graphics, theme::icon::MONITOR, "Grafika"),
     (Page::Data, theme::icon::HARD_DRIVE, "Dane map"),
     (Page::About, theme::icon::INFO, "O programie"),
@@ -224,8 +226,11 @@ impl App {
             if theme::icon_button(ui, theme::icon::GEAR, false).on_hover_text("Ustawienia (Ctrl+,)").clicked() {
                 settings = true;
             }
-            if theme::icon_button(ui, theme::icon::QUESTION, atlas.help).on_hover_text("Skróty i sterowanie (?)").clicked() {
+            if theme::icon_button(ui, theme::icon::QUESTION, atlas.help).on_hover_text("Skróty i sterowanie (?, F1)").clicked() {
                 atlas.help = !atlas.help;
+            }
+            if theme::icon_button(ui, theme::icon::COMMAND, atlas.palette.is_some()).on_hover_text("Paleta poleceń (Ctrl+K)").clicked() {
+                atlas.palette = Some(Default::default());
             }
             if theme::icon_button(ui, theme::icon::CHAT_CIRCLE_TEXT, false).on_hover_text("Zgłoś błąd albo sugestię").clicked() {
                 report = true;
@@ -289,6 +294,7 @@ impl App {
                             theme::switch(ui, &mut view.draft.vsync, "Synchronizacja z monitorem");
                             theme::para(ui, "Bez synchronizacji więcej klatek na sekundę, ale możliwe rozrywanie obrazu. Zmiana działa po ponownym uruchomieniu.");
                         }
+                        Page::Map => crate::ui::panels::map_settings(atlas, ui),
                         Page::Graphics => crate::ui::panels::graphics(atlas, ui),
                         Page::Data => {
                             ui.label(theme::kicker("Zajęte miejsce"));
@@ -552,6 +558,9 @@ impl eframe::App for App {
         if r.open_settings {
             self.open_settings(Page::Data);
         }
+        if r.open_general {
+            self.open_settings(Page::General);
+        }
         if r.check_updates {
             self.check_updates(true);
         }
@@ -566,8 +575,10 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 self.atlas.view_ui(ui, frame);
             });
+        crate::ui::legend::show(&mut self.atlas, ctx);
         crate::ui::panels::nav(&mut self.atlas, ctx);
         crate::ui::search::show(&mut self.atlas, ctx);
+        crate::ui::palette::show(&mut self.atlas, ctx);
         crate::ui::panels::help(&mut self.atlas, ctx);
         self.settings_window(ctx);
         self.moving_overlay(ctx);

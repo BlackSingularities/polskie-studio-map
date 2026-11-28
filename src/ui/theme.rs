@@ -269,9 +269,132 @@ pub fn tab_button(ui: &mut egui::Ui, glyph: &str, label: &str, on: bool, w: f32)
         p.rect_filled(rect, 9.0, Color32::from_white_alpha(12));
     }
     let color = if on { BRASS } else { PAPER_2 };
-    let text = format!("{glyph}  {label}");
+    let text = if label.is_empty() { glyph.to_string() } else { format!("{glyph}  {label}") };
     let g = p.layout_no_wrap(text, FontId::proportional(13.0), color);
     let x = rect.center().x - (g.size().x / 2.0).min(w / 2.0 - 2.0);
     p.with_clip_rect(rect).galley(egui::pos2(x, rect.center().y - g.size().y / 2.0), g, color);
     resp
+}
+
+/// Kafelek z ikoną i podpisem (style mapy, warstwy, pory dnia) – jak w GRANI.
+pub fn tile(ui: &mut egui::Ui, glyph: &str, text: &str, on: bool, w: f32) -> egui::Response {
+    tile_ex(ui, glyph, text, on, w, None)
+}
+
+/// Kafelek, który może być nieaktywny (`disabled` – powód widoczny po najechaniu): szary, bez kliknięcia.
+pub fn tile_ex(ui: &mut egui::Ui, glyph: &str, text: &str, on: bool, w: f32, disabled: Option<&str>) -> egui::Response {
+    let sense = if disabled.is_some() { Sense::hover() } else { Sense::click() };
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 70.0), sense);
+    let p = ui.painter();
+    if let Some(why) = disabled {
+        p.rect_filled(rect, 14.0, Color32::from_white_alpha(3));
+        p.rect_stroke(rect, 14.0, Stroke::new(1.0_f32, Color32::from_white_alpha(8)), egui::StrokeKind::Inside);
+        let gray = Color32::from_gray(88);
+        p.text(rect.center_top() + egui::vec2(0.0, 25.0), egui::Align2::CENTER_CENTER, glyph, FontId::proportional(23.0), gray);
+        let g = p.layout_no_wrap(text.to_string(), FontId::proportional(11.5), gray);
+        let gw = g.size().x.min(w - 8.0);
+        ui.painter_at(rect.shrink2(egui::vec2(4.0, 0.0))).galley(egui::pos2(rect.center().x - gw / 2.0, rect.bottom() - 23.0), g, gray);
+        return resp.on_hover_text(format!("{text}: {why}"));
+    }
+    let bg = if on {
+        Color32::from_rgba_unmultiplied(122, 176, 255, 46)
+    } else if resp.hovered() {
+        Color32::from_white_alpha(16)
+    } else {
+        Color32::from_white_alpha(7)
+    };
+    p.rect_filled(rect, 14.0, bg);
+    let edge = if on { Stroke::new(1.5_f32, BRASS) } else { Stroke::new(1.0_f32, Color32::from_white_alpha(14)) };
+    p.rect_stroke(rect, 14.0, edge, egui::StrokeKind::Inside);
+    let color = if on { BRASS } else { PAPER };
+    p.text(rect.center_top() + egui::vec2(0.0, 25.0), egui::Align2::CENTER_CENTER, glyph, FontId::proportional(23.0), color);
+    let g = p.layout_no_wrap(text.to_string(), FontId::proportional(11.5), if on { PAPER } else { PAPER_2 });
+    let gw = g.size().x.min(w - 8.0);
+    ui.painter_at(rect.shrink2(egui::vec2(4.0, 0.0))).galley(egui::pos2(rect.center().x - gw / 2.0, rect.bottom() - 23.0), g, PAPER);
+    resp.on_hover_text(text)
+}
+
+/// Siatka kafelków o równej szerokości.
+pub fn tile_grid(ui: &mut egui::Ui, cols: usize, body: impl FnOnce(&mut egui::Ui, f32)) {
+    let gap = 8.0;
+    let w = ((ui.available_width() - gap * (cols as f32 - 1.0)) / cols as f32).floor();
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(w * cols as f32 + gap * (cols as f32 - 1.0) + 1.0);
+            body(ui, w);
+        });
+    });
+}
+
+/// Karta wyboru: tytuł i opis, zaznaczona obwódką dookoła i kropką.
+pub fn option_card(ui: &mut egui::Ui, title: &str, desc: &str, on: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 52.0), Sense::click());
+    let p = ui.painter();
+    let bg = if on {
+        Color32::from_rgba_unmultiplied(122, 176, 255, 40)
+    } else if resp.hovered() {
+        Color32::from_white_alpha(14)
+    } else {
+        Color32::from_white_alpha(6)
+    };
+    p.rect_filled(rect, 12.0, bg);
+    if on {
+        p.rect_stroke(rect, 12.0, Stroke::new(1.5_f32, BRASS), egui::StrokeKind::Inside);
+    }
+    let dot = rect.left_center() + egui::vec2(18.0, 0.0);
+    p.circle_stroke(dot, 7.0, Stroke::new(1.5_f32, if on { BRASS } else { PAPER_3 }));
+    if on {
+        p.circle_filled(dot, 4.0, BRASS);
+    }
+    p.text(rect.left_top() + egui::vec2(36.0, 9.0), egui::Align2::LEFT_TOP, title, FontId::proportional(14.0), PAPER);
+    let clip = rect.shrink2(egui::vec2(4.0, 0.0));
+    ui.painter_at(clip).text(rect.left_bottom() + egui::vec2(36.0, -9.0), egui::Align2::LEFT_BOTTOM, desc, FontId::proportional(11.5), PAPER_3);
+    resp
+}
+
+/// Przełącznik segmentowy na całą szerokość (np. „Globalne | Obiekty”): ikona, podpis i licznik.
+/// Zwraca indeks klikniętego segmentu.
+pub fn segmented(ui: &mut egui::Ui, items: &[(&str, &str, usize)], current: usize) -> Option<usize> {
+    let h = 38.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), h), Sense::hover());
+    ui.painter().rect_filled(rect, 12.0, Color32::from_white_alpha(8));
+    let n = items.len().max(1) as f32;
+    let w = (rect.width() - 6.0) / n;
+    let mut picked = None;
+    for (i, (glyph, label, count)) in items.iter().enumerate() {
+        let r = egui::Rect::from_min_size(rect.min + egui::vec2(3.0 + w * i as f32, 3.0), egui::vec2(w, h - 6.0));
+        let resp = ui.interact(r, ui.id().with(("segment", i, *label)), Sense::click());
+        let on = i == current;
+        let p = ui.painter();
+        if on {
+            p.rect_filled(r, 9.0, BRASS_DIM);
+            p.rect_stroke(r, 9.0, Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(122, 176, 255, 120)), egui::StrokeKind::Inside);
+        } else if resp.hovered() {
+            p.rect_filled(r, 9.0, Color32::from_white_alpha(12));
+        }
+        let color = if on { BRASS } else { PAPER_2 };
+        let text = if *count > 0 { format!("{glyph}  {label}  ·  {count}") } else { format!("{glyph}  {label}") };
+        let g = p.layout_no_wrap(text, FontId::proportional(13.5), color);
+        let x = r.center().x - (g.size().x / 2.0).min(w / 2.0 - 2.0);
+        p.with_clip_rect(r).galley(egui::pos2(x, r.center().y - g.size().y / 2.0), g, color);
+        if resp.clicked() {
+            picked = Some(i);
+        }
+    }
+    picked
+}
+
+/// Nagłówek sekcji z ikoną, tytułem i drobnym dopiskiem po prawej.
+pub fn section(ui: &mut egui::Ui, glyph: &str, title: &str, note: &str) {
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(glyph).size(15.0).color(BRASS));
+        ui.label(egui::RichText::new(title).size(14.0).strong().color(PAPER));
+        if !note.is_empty() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new(note).size(11.5).color(PAPER_3));
+            });
+        }
+    });
 }
